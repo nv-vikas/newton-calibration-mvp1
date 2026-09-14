@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "newton-calibration"
 version = "0.1.0"
-description = "SO-101 actuator calibration for Isaac Lab and Newton"
+description = "Evidence-driven articulation calibration for Isaac Lab and Newton"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }

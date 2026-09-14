@@ -109,6 +109,20 @@ class FitJournal:
                 self._refresh_derived_unlocked(state)
             return state
 
+    def verify_snapshot(self) -> FitJournalState:
+        """Validate an immutable journal and its derived records without writing.
+
+        Package verification must not create a lock file inside the package.  Its
+        caller is therefore responsible for supplying a stable snapshot (the
+        package manifest hashes every file before this method is called).
+        """
+
+        state = self._scan_unlocked()
+        if not state.completed_generations:
+            raise FitJournalError("fit journal contains no committed generations")
+        self._verify_derived_unlocked(state)
+        return state
+
     def commit_generation(
         self,
         *,
@@ -294,12 +308,7 @@ class FitJournal:
         )
 
     def _refresh_derived_unlocked(self, state: FitJournalState) -> None:
-        history_lines: list[str] = []
-        for path in state.generation_paths:
-            record = _load_finite_json_mapping(path)
-            for evaluation in record["evaluations"]:
-                history_lines.append(json.dumps(evaluation, sort_keys=True, separators=(",", ":"), allow_nan=False))
-        history_text = "\n".join(history_lines) + ("\n" if history_lines else "")
+        history_text = self._expected_history_text(state)
         atomic_write_text(self.history_path, history_text)
 
         if state.optimizer_state is None:
@@ -315,6 +324,41 @@ class FitJournal:
             **self.checkpoint_metadata,
         }
         atomic_write_json(self.checkpoint_path, checkpoint)
+
+    def _verify_derived_unlocked(self, state: FitJournalState) -> None:
+        if not self.history_path.is_file():
+            raise FitJournalError(f"candidate history is missing: {self.history_path}")
+        try:
+            history_text = self.history_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise FitJournalError(f"cannot read candidate history: {self.history_path}") from exc
+        if history_text != self._expected_history_text(state):
+            raise FitJournalError("candidate history is not the canonical projection of committed generations")
+
+        checkpoint = _load_finite_json_mapping(self.checkpoint_path)
+        updated_at = checkpoint.pop("updated_at", None)
+        if not isinstance(updated_at, str) or not updated_at.strip():
+            raise FitJournalError("fit checkpoint updated_at must be a non-empty string")
+        expected_checkpoint = {
+            "schema": CHECKPOINT_SCHEMA,
+            "run_id": self.run_id,
+            "execution_fingerprint": self.execution_fingerprint,
+            "candidate_id": state.next_candidate_id,
+            "completed_generations": state.completed_generations,
+            "optimizer_state": state.optimizer_state,
+            **self.checkpoint_metadata,
+        }
+        if checkpoint != expected_checkpoint:
+            raise FitJournalError("fit checkpoint is not the canonical projection of committed generations")
+
+    @staticmethod
+    def _expected_history_text(state: FitJournalState) -> str:
+        history_lines: list[str] = []
+        for path in state.generation_paths:
+            record = _load_finite_json_mapping(path)
+            for evaluation in record["evaluations"]:
+                history_lines.append(json.dumps(evaluation, sort_keys=True, separators=(",", ":"), allow_nan=False))
+        return "\n".join(history_lines) + ("\n" if history_lines else "")
 
     @contextmanager
     def _locked(self) -> Iterator[None]:

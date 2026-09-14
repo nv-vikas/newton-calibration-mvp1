@@ -68,6 +68,45 @@ def test_generation_records_are_authoritative_and_rebuild_derived_files(tmp_path
     assert checkpoint["optimizer_name"] == "minjae"
 
 
+def test_verify_snapshot_accepts_canonical_journal_without_creating_a_lock(tmp_path):
+    journal = FitJournal(
+        tmp_path,
+        run_id="run-1",
+        execution_fingerprint="fingerprint-1",
+        checkpoint_metadata={"optimizer_name": "minjae", "optimizer_version": "1"},
+    )
+    state = _commit(journal, 0, 0)
+    journal.lock_path.unlink()
+
+    verified = journal.verify_snapshot()
+
+    assert verified == state
+    assert not journal.lock_path.exists()
+
+
+@pytest.mark.parametrize("artifact", ["candidate-history.jsonl", "fit-checkpoint.json"])
+def test_verify_snapshot_rejects_noncanonical_derived_projection(tmp_path, artifact):
+    journal = FitJournal(
+        tmp_path,
+        run_id="run-1",
+        execution_fingerprint="fingerprint-1",
+        checkpoint_metadata={"optimizer_name": "minjae", "optimizer_version": "1"},
+    )
+    _commit(journal, 0, 0)
+    path = tmp_path / artifact
+    if artifact == "candidate-history.jsonl":
+        path.write_text("stale\n", encoding="utf-8")
+        message = "candidate history is not the canonical projection"
+    else:
+        checkpoint = json.loads(path.read_text(encoding="utf-8"))
+        checkpoint["completed_generations"] = 99
+        atomic_write_json(path, checkpoint)
+        message = "fit checkpoint is not the canonical projection"
+
+    with pytest.raises(FitJournalError, match=message):
+        journal.verify_snapshot()
+
+
 def test_scan_rejects_different_run_or_execution_fingerprint(tmp_path):
     original = FitJournal(tmp_path, run_id="run-1", execution_fingerprint="fingerprint-1")
     _commit(original, 0, 0)

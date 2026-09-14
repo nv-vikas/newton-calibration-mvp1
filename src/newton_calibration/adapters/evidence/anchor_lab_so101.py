@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from newton_calibration.core.io import sha256_files
+from newton_calibration.core.io import sha256_file, sha256_files
 
 HF_REPO_ID = "nvidia/Anchor-Lab"
 DEFAULT_REVISION = "647edd5787cd764cdc041103ad282dc59214d919"
@@ -28,6 +28,8 @@ class SO101Episode:
     actual_q: np.ndarray
     actual_dq: np.ndarray
     joints: list[str]
+    trial_id: str
+    source_sha256: str
 
 
 def fetch_anchor_lab_so101(output_dir: str | Path, revision: str = DEFAULT_REVISION) -> dict[str, str]:
@@ -157,6 +159,8 @@ class AnchorLabSO101Evidence:
             actual_q=actual,
             actual_dq=velocity,
             joints=list(SO101_JOINTS),
+            trial_id=path.stem,
+            source_sha256=sha256_file(path),
         )
 
     def _resolve_name(self, name: str) -> Path:

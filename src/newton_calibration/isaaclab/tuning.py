@@ -3,14 +3,25 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from newton_calibration.adapters.asset import supported_parameter_names, validate_so101_asset
-from newton_calibration.adapters.evidence import AnchorLabSO101Evidence
+from newton_calibration.adapters.asset import (
+    inspect_usd as inspect_usd_asset,
+)
+from newton_calibration.adapters.asset import (
+    supported_parameter_names,
+    validate_articulation_asset,
+    validate_so101_asset,
+)
+from newton_calibration.adapters.evidence import AnchorLabSO101Evidence, TabularJointEvidence
 from newton_calibration.adapters.runtime import create_runtime
+from newton_calibration.core.attestation import record_fingerprint
+from newton_calibration.core.evidence_spec import BoundEvidenceSpec
 from newton_calibration.core.fit_journal import FitJournal
 from newton_calibration.core.io import sha256_file, utc_now, write_json
+from newton_calibration.core.joint_mapping import JointMappingReport, propose_joint_mapping
 from newton_calibration.core.models import (
     AnalysisResult,
     CalibrationPackage,
@@ -37,7 +48,8 @@ from newton_calibration.recipes import get_recipe
 def analyze(
     *,
     env: Any,
-    evidence: str | Path | AnchorLabSO101Evidence,
+    evidence: str | Path | AnchorLabSO101Evidence | TabularJointEvidence | BoundEvidenceSpec,
+    recipe: str | None = None,
     evidence_revision: str = "local",
     workdir: str | Path = "runs",
 ) -> AnalysisResult:
@@ -46,38 +58,80 @@ def analyze(
     The signal/name checks below establish that a parameter is reasonable to
     include in this recipe.  They are not a numerical identifiability proof.
     """
-    environment = _environment_spec(env)
+    environment = _lock_residual_fingerprint(_environment_spec(env))
     adapter = _evidence_adapter(evidence, evidence_revision)
     inventory = adapter.inventory()
-    recipe = get_recipe("so101_actuator_dynamics.v1")
-    asset_errors = validate_so101_asset(environment)
+    generic = environment.profile_schema == "articulation-profile/v1"
+    recipe_name = recipe or ("articulation.position_pd.free_space.v1" if generic else "so101_actuator_dynamics.v1")
+    recipe_cfg = get_recipe(recipe_name, environment if generic else None)
+    if generic:
+        asset_report = validate_articulation_asset(environment)
+        asset_errors = list(asset_report.blockers)
+        asset_warnings = list(asset_report.warnings)
+    else:
+        asset_errors = validate_so101_asset(environment)
+        asset_warnings = []
     exposed = supported_parameter_names(environment)
-    identifiability = _identify_parameters(inventory)
+    identifiability = _identify_parameters(inventory, environment if generic else None)
     identifiable = [
-        parameter for parameter in recipe.parameters if parameter.name in exposed and parameter.name in identifiability
+        parameter
+        for parameter in recipe_cfg.parameters
+        if parameter.name in exposed and parameter.name in identifiability
     ]
-    required_joints = set(environment.joint_map)
-    evidence_joints = set(inventory["joints"])
+    required_joint_order = _ordered_joints(environment) if generic else list(environment.joint_map)
+    required_joints = set(required_joint_order)
+    evidence_joints = set(inventory.get("source_joints", inventory["joints"]))
+    mapping_report = _mapping_report(environment, adapter, required_joints) if generic else {}
+    residual_errors = _residual_errors(environment, required_joint_order)
+    requested_names = set(recipe_cfg.required_parameter_names)
+    declared_names = {parameter.name for parameter in recipe_cfg.parameters}
     readiness = {
         "asset_exists": not any(error.startswith("USD asset does not exist") for error in asset_errors),
+        "asset_profile_valid": not asset_errors,
+        "residual_model_valid": not residual_errors,
         "joint_map_complete": required_joints.issubset(evidence_joints)
-        and not any("joint map" in error for error in asset_errors),
+        and not any("joint map" in error.lower() or "mapping" in error.lower() for error in asset_errors)
+        and (not generic or bool(mapping_report.get("ready"))),
         "required_signals_present": bool(inventory["required_signals_present"]),
         "train_split_present": bool(inventory["train_episodes"]),
         "heldout_split_present": bool(inventory["heldout_episodes"]),
-        "requested_parameter_surface_exposed": all(parameter.name in exposed for parameter in recipe.parameters),
-        "requested_parameters_identifiable": len(identifiable) == len(recipe.parameters),
+        "requested_parameter_surface_exposed": requested_names.issubset(exposed),
+        "requested_parameter_bounds_declared": requested_names == declared_names,
+        "requested_parameters_identifiable": {parameter.name for parameter in identifiable} == requested_names,
     }
-    warnings = list(asset_errors)
-    warnings.extend(
-        [
-            "Anchor-Lab does not publish a complete units/controller dictionary; q and dq are treated as radians and radians/s.",
-            "present_load_raw and tau_abs are excluded from the primary objective because raw-load calibration and torque sign are unavailable.",
-            "MVP1 validates free-space arm and unloaded gripper actuation; it does not claim absolute gripping force or contact fidelity.",
-            "The released SO-101 USD is already calibrated; use an explicitly declared untuned asset for unbiased improvement claims.",
-        ]
-    )
-    run_id = f"so101-{uuid.uuid4().hex[:10]}"
+    warnings = list(asset_errors) + asset_warnings + residual_errors
+    if generic:
+        missing_bounds = sorted(requested_names - declared_names)
+        if missing_bounds:
+            warnings.append(
+                "Robot-specific safe bounds are required for absolute armature/friction parameters: "
+                + ", ".join(missing_bounds)
+            )
+        unqualified = sorted(requested_names - set(identifiability))
+        if unqualified:
+            warnings.append(
+                "Evidence does not qualify these parameters for fitting: "
+                + ", ".join(unqualified)
+                + ". Delay requires synchronized clocks; dynamic terms require measured motion excitation; "
+                "friction requires bidirectional reversals; effort scale requires an explicit saturation observation."
+            )
+        warnings.extend(
+            [
+                "The mapping is a locked coordinate transform, not an optimizer variable; ambiguous names, units, signs, or offsets must be confirmed before planning.",
+                "MVP1 validates free-space position-controlled articulation dynamics only; it does not claim contact, grasp force, or task transfer.",
+            ]
+        )
+    else:
+        warnings.extend(
+            [
+                "Anchor-Lab does not publish a complete units/controller dictionary; q and dq are treated as radians and radians/s.",
+                "present_load_raw and tau_abs are excluded from the primary objective because raw-load calibration and torque sign are unavailable.",
+                "MVP1 validates free-space arm and unloaded gripper actuation; it does not claim absolute gripping force or contact fidelity.",
+                "The released SO-101 USD is already calibrated; use an explicitly declared untuned asset for unbiased improvement claims.",
+            ]
+        )
+    prefix = _run_prefix(environment.robot_id if generic else "so101")
+    run_id = f"{prefix}-{uuid.uuid4().hex[:10]}"
     run_dir = Path(workdir).expanduser().resolve() / run_id
     result = AnalysisResult(
         run_id=run_id,
@@ -99,6 +153,9 @@ def analyze(
         warnings=warnings,
         readiness=readiness,
         workdir=str(run_dir),
+        recipe=recipe_cfg.name,
+        evidence_spec=_describe_evidence(adapter),
+        mapping_report=mapping_report,
     )
     write_json(run_dir / "analysis.json", result)
     return result
@@ -107,7 +164,7 @@ def analyze(
 def plan(
     analysis: AnalysisResult,
     *,
-    recipe: str = "so101_actuator_dynamics.v1",
+    recipe: str | None = None,
     optimizer: str | None = None,
     optimizer_options: dict[str, Any] | None = None,
 ) -> CalibrationPlan:
@@ -115,7 +172,15 @@ def plan(
     failed = [name for name, ready in analysis.readiness.items() if not ready]
     if failed:
         raise ValueError(f"Cannot plan calibration; readiness checks failed: {failed}")
-    recipe_cfg = get_recipe(recipe)
+    selected_recipe = recipe or analysis.recipe or "so101_actuator_dynamics.v1"
+    if analysis.recipe and selected_recipe != analysis.recipe:
+        raise ValueError(
+            f"Analysis used recipe {analysis.recipe!r}; rerun analyze() before changing to {selected_recipe!r}"
+        )
+    recipe_cfg = get_recipe(
+        selected_recipe,
+        analysis.environment if analysis.environment.profile_schema == "articulation-profile/v1" else None,
+    )
     optimizer_config = dict(recipe_cfg.optimizer)
     optimizer_name = optimizer or str(optimizer_config["name"])
     optimizer_registration = get_optimizer_registration(optimizer_name)
@@ -143,6 +208,7 @@ def plan(
         optimizer={**optimizer_config, "max_episode_duration_s": recipe_cfg.max_episode_duration_s},
         validation_gates=dict(recipe_cfg.validation_gates),
         workdir=analysis.workdir,
+        evidence_spec=dict(analysis.evidence_spec),
     )
     write_json(Path(result.workdir) / "plan.json", result)
     return result
@@ -158,7 +224,7 @@ def fit(
     """Call 3/5: replay evidence, search parameters, and checkpoint every generation."""
     run_dir = Path(calibration_plan.workdir)
     history_path = run_dir / "candidate-history.jsonl"
-    evidence = _evidence_adapter(calibration_plan.evidence_uri, calibration_plan.evidence_revision)
+    evidence = _evidence_adapter_from_plan(calibration_plan)
     _assert_locked_inputs_unchanged(calibration_plan, evidence=evidence)
     duration = float(calibration_plan.optimizer["max_episode_duration_s"])
     episodes = [
@@ -253,9 +319,12 @@ def fit(
     candidate_id = journal_state.next_candidate_id
 
     runtime = create_runtime(calibration_plan.environment)
+    runtime_attestation: dict[str, Any] = {}
     try:
         initial = {parameter.name: parameter.initial for parameter in calibration_plan.parameters}
-        baseline_eval = _evaluate(runtime, initial, episodes, calibration_plan, candidate_id=-1, generation=-1)
+        baseline_eval = _evaluate(
+            runtime, initial, episodes, calibration_plan, candidate_id=-1, generation=-1, phase="fit-baseline"
+        )
         write_json(run_dir / "baseline.json", baseline_eval)
         for generation in range(optimizer.generation, generation_count):
             candidate_id_start = candidate_id
@@ -268,7 +337,13 @@ def fit(
             for candidate in candidates:
                 try:
                     evaluation = _evaluate(
-                        runtime, candidate, episodes, calibration_plan, candidate_id=candidate_id, generation=generation
+                        runtime,
+                        candidate,
+                        episodes,
+                        calibration_plan,
+                        candidate_id=candidate_id,
+                        generation=generation,
+                        phase="fit-search",
                     )
                 # A bad physics candidate is data, not a reason to lose a long-running job.
                 except Exception as exc:  # noqa: BLE001
@@ -320,7 +395,12 @@ def fit(
             calibration_plan,
             candidate_id=candidate_id,
             generation=optimizer.generation,
+            phase="fit-selected",
         )
+        # Capture the attestation only after the selected result has actually
+        # executed.  A successfully constructed runtime is not sufficient
+        # evidence that its parameter surface was exercised by the fit.
+        runtime_attestation = runtime.attestation()
     finally:
         runtime.close()
 
@@ -334,6 +414,7 @@ def fit(
         completed_generations=optimizer.generation,
         backend=calibration_plan.environment.adapter,
         optimizer=optimizer_record,
+        runtime_attestation=runtime_attestation,
     )
     write_json(run_dir / "fit.json", result)
     return result
@@ -342,7 +423,10 @@ def fit(
 def validate(fit_run: FitResult) -> ValidationResult:
     """Call 4/5: compare baseline and calibrated parameters on data excluded from fitting."""
     plan_cfg = fit_run.plan
-    evidence = _evidence_adapter(plan_cfg.evidence_uri, plan_cfg.evidence_revision)
+    canonical_baseline = {parameter.name: parameter.initial for parameter in plan_cfg.parameters}
+    if fit_run.baseline.parameters != canonical_baseline:
+        raise ValueError("Fit baseline parameters do not match the locked recipe initials")
+    evidence = _evidence_adapter_from_plan(plan_cfg)
     _assert_locked_inputs_unchanged(plan_cfg, evidence=evidence)
     duration = float(plan_cfg.optimizer["max_episode_duration_s"])
     episodes = [
@@ -350,9 +434,31 @@ def validate(fit_run: FitResult) -> ValidationResult:
         for name in plan_cfg.heldout_episodes
     ]
     runtime = create_runtime(plan_cfg.environment)
+    runtime_attestation: dict[str, Any] = {}
     try:
-        baseline = _evaluate(runtime, fit_run.baseline.parameters, episodes, plan_cfg, candidate_id=-1, generation=-1)
-        calibrated = _evaluate(runtime, fit_run.best.parameters, episodes, plan_cfg, candidate_id=-2, generation=-1)
+        baseline = _evaluate(
+            runtime,
+            canonical_baseline,
+            episodes,
+            plan_cfg,
+            candidate_id=-1,
+            generation=-1,
+            phase="heldout-baseline",
+        )
+        baseline_attestation = runtime.attestation()
+        calibrated = _evaluate(
+            runtime,
+            fit_run.best.parameters,
+            episodes,
+            plan_cfg,
+            candidate_id=-2,
+            generation=-1,
+            phase="heldout-validation",
+        )
+        runtime_attestation = {
+            "baseline": baseline_attestation,
+            "calibrated": runtime.attestation(),
+        }
     finally:
         runtime.close()
     improvement = 100.0 * (baseline.score - calibrated.score) / max(abs(baseline.score), 1e-12)
@@ -370,7 +476,7 @@ def validate(fit_run: FitResult) -> ValidationResult:
         "stable": calibrated.stable,
         "minimum_improvement": improvement >= float(plan_cfg.validation_gates["minimum_improvement_pct"]),
         "no_large_episode_regression": not regressions,
-        "heldout_only": all("-heldout-" in name for name in plan_cfg.heldout_episodes),
+        "heldout_only": all(episode.split == "heldout" for episode in episodes),
     }
     result = ValidationResult(
         run_id=fit_run.run_id,
@@ -383,6 +489,9 @@ def validate(fit_run: FitResult) -> ValidationResult:
         regressions=regressions,
         passed=all(gates.values()),
         gates=gates,
+        runtime_attestation=runtime_attestation,
+        baseline_stable=baseline.stable,
+        calibrated_stable=calibrated.stable,
     )
     write_json(Path(plan_cfg.workdir) / "validation.json", result)
     return result
@@ -391,6 +500,7 @@ def validate(fit_run: FitResult) -> ValidationResult:
 def write(validation: ValidationResult, *, output: str | Path) -> CalibrationPackage:
     """Call 5/5: emit the setup-scoped package and complete job record."""
     _assert_locked_inputs_unchanged(validation.fit.plan)
+    _assert_result_records_unchanged(validation)
     return write_package(validation, output)
 
 
@@ -404,11 +514,70 @@ def _environment_spec(env: Any) -> EnvironmentSpec:
     raise TypeError("env must be an EnvironmentSpec or expose describe() -> EnvironmentSpec")
 
 
-def _evidence_adapter(value: str | Path | AnchorLabSO101Evidence, revision: str) -> AnchorLabSO101Evidence:
-    return value if isinstance(value, AnchorLabSO101Evidence) else AnchorLabSO101Evidence(value, revision=revision)
+def _lock_residual_fingerprint(environment: EnvironmentSpec) -> EnvironmentSpec:
+    if not environment.residual_model_path or environment.residual_model_sha256:
+        return environment
+    path = Path(environment.residual_model_path).expanduser().resolve()
+    if not path.is_file():
+        return environment
+    return replace(environment, residual_model_sha256=sha256_file(path))
+
+
+def _residual_errors(environment: EnvironmentSpec, logical_joints: list[str]) -> list[str]:
+    if not environment.residual_model_path:
+        return []
+    path = Path(environment.residual_model_path).expanduser().resolve()
+    if not path.is_file():
+        return [f"Actuator residual does not exist: {path}"]
+    current = sha256_file(path)
+    if environment.residual_model_sha256 != current:
+        return ["Actuator residual fingerprint does not match the locked environment"]
+    try:
+        from newton_calibration.actuators import load_residual
+
+        load_residual(path, logical_joints)
+    except (KeyError, TypeError, ValueError) as exc:
+        return [f"Actuator residual is invalid for the controlled joint order: {exc}"]
+    return []
+
+
+def _evidence_adapter(value: Any, revision: str):
+    if isinstance(value, (AnchorLabSO101Evidence, TabularJointEvidence)):
+        return value
+    if isinstance(value, BoundEvidenceSpec):
+        return TabularJointEvidence(value)
+    if isinstance(value, dict) and value.get("adapter") == "tabular_joint.v1":
+        return TabularJointEvidence(BoundEvidenceSpec.from_dict(value))
+    if isinstance(value, (str, Path)) and Path(value).suffix.lower() == ".json":
+        # JSON is the serialized generic evidence contract.  Never reinterpret
+        # a malformed contract as a legacy evidence locator: doing so could
+        # silently discard its split, mapping, or unit semantics.
+        return TabularJointEvidence(BoundEvidenceSpec.read(value))
+    return AnchorLabSO101Evidence(value, revision=revision)
+
+
+def _evidence_adapter_from_plan(plan_cfg: CalibrationPlan):
+    if plan_cfg.evidence_spec.get("adapter") == "tabular_joint.v1":
+        return TabularJointEvidence(BoundEvidenceSpec.from_dict(plan_cfg.evidence_spec))
+    return _evidence_adapter(plan_cfg.evidence_uri, plan_cfg.evidence_revision)
+
+
+def _describe_evidence(adapter: Any) -> dict[str, Any]:
+    if isinstance(adapter, TabularJointEvidence):
+        payload = adapter.spec.to_dict()
+        payload["fingerprint"] = adapter.spec.fingerprint
+        payload["mapping_fingerprint"] = adapter.spec.mapping_fingerprint
+        return payload
+    return {
+        "adapter": "anchor_lab_so101.v1",
+        "root": adapter.uri,
+        "revision": adapter.revision,
+    }
 
 
 def _select_episodes(available: list[str], selectors: tuple[str, ...]) -> list[str]:
+    if not selectors:
+        return list(available)
     selected: list[str] = []
     for selector in selectors:
         matches = [name for name in available if selector in name]
@@ -433,14 +602,21 @@ def _positive_integer(label: str, value: Any) -> int:
 def _assert_locked_inputs_unchanged(
     calibration_plan: CalibrationPlan,
     *,
-    evidence: AnchorLabSO101Evidence | None = None,
+    evidence: Any | None = None,
 ) -> None:
     """Reject a fit or validation if evidence or USD bytes drift after planning."""
 
-    evidence_adapter = evidence or _evidence_adapter(
-        calibration_plan.evidence_uri,
-        calibration_plan.evidence_revision,
-    )
+    plan_path = Path(calibration_plan.workdir).expanduser().resolve() / "plan.json"
+    if not plan_path.is_file():
+        raise RuntimeError("Locked calibration plan record is missing")
+    try:
+        recorded_plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Locked calibration plan record is unreadable") from exc
+    if recorded_plan != jsonable(calibration_plan):
+        raise RuntimeError("Calibration plan changed after plan() locked it; create a new plan")
+
+    evidence_adapter = evidence or _evidence_adapter_from_plan(calibration_plan)
     current_evidence_fingerprint = evidence_adapter.inventory()["fingerprint"]
     if current_evidence_fingerprint != calibration_plan.evidence_fingerprint:
         raise RuntimeError(
@@ -453,10 +629,46 @@ def _assert_locked_inputs_unchanged(
         raise RuntimeError(
             "USD asset fingerprint changed after the calibration plan was locked; run analyze() and plan() again"
         )
+    residual_path = calibration_plan.environment.residual_model_path
+    residual_sha256 = calibration_plan.environment.residual_model_sha256
+    if residual_path:
+        path = Path(residual_path).expanduser().resolve()
+        if not path.is_file() or residual_sha256 is None or sha256_file(path) != residual_sha256:
+            raise RuntimeError(
+                "Actuator residual changed after the calibration plan was locked; run analyze() and plan() again"
+            )
+    elif residual_sha256 is not None:
+        raise RuntimeError("Calibration plan contains a residual fingerprint without a residual model path")
 
 
-def _evaluate(runtime, candidate, episodes, plan_cfg, candidate_id, generation) -> CandidateEvaluation:
-    score, metrics, per_episode, stable = runtime.evaluate(candidate, episodes, plan_cfg.objective_weights)
+def _assert_result_records_unchanged(validation: ValidationResult) -> None:
+    run_dir = Path(validation.fit.plan.workdir).expanduser().resolve()
+    for name, expected in (
+        ("fit.json", jsonable(validation.fit)),
+        ("validation.json", jsonable(validation)),
+    ):
+        path = run_dir / name
+        if not path.is_file():
+            raise RuntimeError(f"Durable calibration result is missing: {name}")
+        try:
+            actual = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"Durable calibration result is unreadable: {name}") from exc
+        if actual != expected:
+            raise RuntimeError(f"In-memory calibration result differs from durable {name}")
+
+
+def _evaluate(runtime, candidate, episodes, plan_cfg, candidate_id, generation, *, phase) -> CandidateEvaluation:
+    score, metrics, per_episode, stable = runtime.evaluate(
+        candidate,
+        episodes,
+        plan_cfg.objective_weights,
+        phase=phase,
+        run_id=plan_cfg.run_id,
+        plan_sha256=record_fingerprint(jsonable(plan_cfg)),
+        evidence_fingerprint=plan_cfg.evidence_fingerprint,
+        mapping_fingerprint=str(plan_cfg.evidence_spec.get("mapping_fingerprint", "")),
+    )
     return CandidateEvaluation(
         candidate_id=candidate_id,
         generation=generation,
@@ -468,7 +680,46 @@ def _evaluate(runtime, candidate, episodes, plan_cfg, candidate_id, generation) 
     )
 
 
-def _identify_parameters(inventory: dict[str, Any]) -> dict[str, str]:
+def _identify_parameters(inventory: dict[str, Any], environment: EnvironmentSpec | None = None) -> dict[str, str]:
+    if environment is not None and environment.profile_schema == "articulation-profile/v1":
+        signals = set(inventory["signals"])
+        evidence_joints = set(inventory.get("source_joints", inventory["joints"]))
+        dynamically_excited = set(inventory.get("dynamic_excitation_joints", ()))
+        reversed_joints = set(inventory.get("reversal_joints", ()))
+        saturation_joints = set(inventory.get("effort_saturation_joints", ()))
+        reasons: dict[str, str] = {}
+        complete_signals = {"command_q", "actual_q", "actual_dq"}.issubset(signals)
+        for group, members in environment.joint_groups.items():
+            group_joints = set(members)
+            covered = group_joints.issubset(evidence_joints) and bool(inventory["train_episodes"])
+            if complete_signals and covered and group_joints.issubset(dynamically_excited):
+                reasons.update(
+                    {
+                        f"{group}_stiffness_scale": f"measured dynamic excitation covers every {group} coordinate",
+                        f"{group}_damping_scale": f"measured dynamic excitation covers every {group} coordinate",
+                        f"{group}_armature": f"measured dynamic excitation covers every {group} coordinate",
+                    }
+                )
+            if complete_signals and covered and group_joints.issubset(reversed_joints):
+                reasons[f"{group}_friction_nm"] = (
+                    f"measured bidirectional reversals cover every {group} coordinate"
+                )
+            if complete_signals and covered and group_joints.issubset(saturation_joints):
+                reasons[f"{group}_effort_scale"] = (
+                    f"independently declared effort saturation covers every {group} coordinate"
+                )
+        timing_rates = inventory.get("sample_rates_hz", {})
+        timed_streams = {"command_q", "actual_q"}.issubset(timing_rates)
+        if (
+            complete_signals
+            and inventory.get("clock_synchronized") is True
+            and timed_streams
+            and bool(dynamically_excited)
+        ):
+            reasons["command_delay_s"] = (
+                "synchronized command/state clocks and measured excitation qualify latency scoring"
+            )
+        return reasons
     names = inventory["train_episodes"]
     signals = set(inventory["signals"])
     joints = set(inventory["joints"])
@@ -503,6 +754,74 @@ def _identify_parameters(inventory: dict[str, Any]) -> dict[str, str]:
     if timed:
         reasons["command_delay_s"] = "independently timestamped command and state streams expose latency"
     return reasons
+
+
+def inspect_usd(path: str | Path):
+    """Agent preflight: enumerate supported USD joints and typed blockers."""
+
+    return inspect_usd_asset(path)
+
+
+def propose_mapping(*, usd: str | Path | Any, source_joints: list[str] | tuple[str, ...]) -> JointMappingReport:
+    """Agent preflight: propose only deterministic exact/normalized joint matches."""
+
+    report = inspect_usd_asset(usd) if isinstance(usd, (str, Path)) else usd
+    targets = [joint.name for joint in report.joints]
+    return propose_joint_mapping(source_joints, targets)
+
+
+def inspect_evidence(evidence: Any, *, evidence_revision: str = "local") -> dict[str, Any]:
+    """Agent preflight: inventory a configured evidence source without fitting."""
+
+    return _evidence_adapter(evidence, evidence_revision).inventory()
+
+
+def _mapping_report(environment: EnvironmentSpec, adapter: Any, required_joints: set[str]) -> dict[str, Any]:
+    if not isinstance(adapter, TabularJointEvidence):
+        return {
+            "ready": False,
+            "blockers": ["Generic articulation calibration requires a bound evidence manifest"],
+        }
+    bindings = adapter.spec.joint_bindings
+    binding_map = {item.source_joint: item.usd_joint for item in bindings}
+    expected_order = _ordered_joints(environment)
+    binding_order = [item.source_joint for item in bindings]
+    blockers: list[str] = []
+    if binding_order != expected_order:
+        blockers.append(
+            "Bound evidence joint order does not match the robot profile: "
+            f"expected {expected_order}, found {binding_order}"
+        )
+    expected_map = {name: environment.joint_map.get(name) for name in expected_order}
+    if binding_map != expected_map:
+        blockers.append("Bound evidence mapping does not exactly match the confirmed robot profile")
+    if set(binding_map) != required_joints:
+        blockers.append("Bound evidence does not cover exactly the controlled logical joints")
+    non_radian_targets = sorted(
+        item.source_joint for item in bindings if item.usd_unit != "rad"
+    )
+    if non_radian_targets:
+        blockers.append(
+            "The MVP1 Newton revolute-joint runtime requires target units in radians; "
+            f"non-radian bindings: {non_radian_targets}"
+        )
+    return {
+        "ready": not blockers,
+        "blockers": blockers,
+        "mapping_fingerprint": adapter.spec.mapping_fingerprint,
+        "bindings": [item.to_dict() for item in bindings],
+    }
+
+
+def _run_prefix(value: str) -> str:
+    normalized = "".join(character if character.isalnum() else "-" for character in value.casefold())
+    return normalized.strip("-") or "articulation"
+
+
+def _ordered_joints(environment: EnvironmentSpec) -> list[str]:
+    return list(environment.joint_order) or [
+        joint for members in environment.joint_groups.values() for joint in members
+    ]
 
 
 def _fit_execution_fingerprint(

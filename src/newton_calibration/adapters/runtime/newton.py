@@ -1,15 +1,26 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
 
 from newton_calibration.actuators import load_residual
+from newton_calibration.adapters.runtime.analytic import (
+    _joint_properties,
+    _resolve_joint_layout,
+    _validate_episode_width,
+)
+from newton_calibration.core.attestation import (
+    episode_inputs,
+    evaluation_result_fingerprint,
+    numeric_surface_fingerprint,
+    parameter_fingerprint,
+)
+from newton_calibration.core.io import sha256_file
 from newton_calibration.core.models import EnvironmentSpec
 from newton_calibration.validation.metrics import compare_trajectories
-
-_SO101_JOINT_ORDER = ("rotation", "pitch", "elbow", "wrist_pitch", "wrist_roll", "jaw")
 
 
 class IsaacLabNewtonRuntime:
@@ -17,10 +28,18 @@ class IsaacLabNewtonRuntime:
 
     def __init__(self, environment: EnvironmentSpec):
         self.environment = environment
+        self.joint_layout = _resolve_joint_layout(environment)
+        self.actuator_name = "so101" if self.joint_layout.legacy_so101 else "calibration"
+        # Validate per-joint defaults before importing or launching Isaac Lab.
+        _joint_properties(environment, self.joint_layout, {}, analytic=False)
         if environment.calibration_manifest_path:
-            from newton_calibration.adapters.surface.package_loader import VerifiedSO101Package
+            from newton_calibration.adapters.surface.package_loader import (
+                VerifiedArticulationPackage,
+                VerifiedSO101Package,
+            )
 
-            verified = VerifiedSO101Package.open(
+            package_type = VerifiedSO101Package if self.joint_layout.legacy_so101 else VerifiedArticulationPackage
+            verified = package_type.open(
                 Path(environment.calibration_manifest_path).parent,
                 expected_manifest_sha256=environment.calibration_manifest_sha256,
             )
@@ -74,12 +93,14 @@ class IsaacLabNewtonRuntime:
         self.sim = self._sim_context_manager.__enter__()
         self.sim._app_control_on_stop_handle = None
         sim_utils.create_prim("/World/Env_0", "Xform")
+        desired = list(self.joint_layout.runtime_names)
+        selected_joint_patterns = [f"^{re.escape(name)}$" for name in desired]
         cfg = ArticulationCfg(
             prim_path="/World/Env_.*/Robot",
             spawn=sim_utils.UsdFileCfg(usd_path=self.environment.asset_path),
             actuators={
-                "so101": IdealPDActuatorCfg(
-                    joint_names_expr=[".*"],
+                self.actuator_name: IdealPDActuatorCfg(
+                    joint_names_expr=selected_joint_patterns,
                     stiffness=self.environment.base_stiffness,
                     damping=self.environment.base_damping,
                     armature=self.environment.base_armature,
@@ -93,24 +114,90 @@ class IsaacLabNewtonRuntime:
         self.robot = Articulation(cfg)
         self.sim.reset()
         if not self.robot.is_initialized:
-            raise RuntimeError("SO-101 articulation did not initialize in Newton")
-        desired = [self.environment.joint_map[name] for name in _SO101_JOINT_ORDER]
-        self.joint_ids, matched = self.robot.find_joints(desired, preserve_order=True)
+            raise RuntimeError(f"Articulation {self.environment.robot_id!r} did not initialize in Newton")
+        self.joint_ids, matched = self.robot.find_joints(selected_joint_patterns, preserve_order=True)
         if matched != desired:
-            raise RuntimeError(f"SO-101 joint mapping mismatch. Expected {desired}, found {matched}")
+            raise RuntimeError(
+                f"Articulation {self.environment.robot_id!r} joint mapping mismatch. "
+                f"Expected {desired}, found {matched}"
+            )
+        actuator = self.robot.actuators[self.actuator_name]
+        actuator_names = list(getattr(actuator, "joint_names", ()))
+        if actuator_names != desired:
+            raise RuntimeError(
+                f"Calibration actuator joint mismatch. Expected {desired}, found {actuator_names}"
+            )
+        actuator_global_ids = _actuator_global_indices(
+            getattr(actuator, "joint_indices", None),
+            total_joints=self.robot.num_joints,
+        )
+        if actuator_global_ids != list(self.joint_ids):
+            raise RuntimeError(
+                "Calibration actuator indices do not match the selected articulation joints: "
+                f"actuator={actuator_global_ids}, articulation={list(self.joint_ids)}"
+            )
         self.joint_ids_tensor = torch.tensor(self.joint_ids, device=self.environment.device, dtype=torch.long)
         self.env_ids_tensor = torch.tensor([0], device=self.environment.device, dtype=torch.long)
-        self.residual = load_residual(
-            self.environment.residual_model_path,
-            list(_SO101_JOINT_ORDER),
-        )
-        if self.environment.calibration_parameters:
-            self._apply_candidate(dict(self.environment.calibration_parameters))
+        residual_path = self.environment.residual_model_path
+        residual_before = sha256_file(residual_path) if residual_path else None
+        self.residual = load_residual(residual_path, list(self.joint_layout.logical_names))
+        residual_after = sha256_file(residual_path) if residual_path else None
+        if residual_before != residual_after:
+            raise RuntimeError("Actuator residual changed while the Newton runtime was loading it")
+        if self.environment.residual_model_sha256 not in (None, residual_after):
+            raise RuntimeError("Actuator residual does not match the locked environment fingerprint")
+        self._loaded_residual_sha256 = residual_after
+        # Capture the complete post-import state once. Every episode restores
+        # root pose/velocity and every DOF before selected evidence coordinates
+        # are overwritten, so passive/unselected joints cannot leak state from
+        # one candidate or episode into the next.
+        self._canonical_root_pose = self.robot.data.root_link_pose_w.torch.clone()
+        self._canonical_root_velocity = self.robot.data.root_com_vel_w.torch.clone()
+        self._canonical_joint_position = self.robot.data.joint_pos.torch.clone()
+        self._canonical_joint_velocity = self.robot.data.joint_vel.torch.clone()
+        self._apply_candidate(dict(self.environment.calibration_parameters))
+        self._verify_actuator_readback(dict(self.environment.calibration_parameters))
 
     def describe(self) -> EnvironmentSpec:
         return self.environment
 
-    def evaluate(self, candidate, episodes: Sequence, objective_weights):
+    def attestation(self) -> dict[str, object]:
+        if not hasattr(self, "_last_evaluation"):
+            raise RuntimeError("Newton runtime cannot attest before a complete evidence evaluation succeeds")
+        return {
+            "schema": "newton.calibration.runtime-attestation/v2",
+            "backend": "isaaclab_newton",
+            "authoritative": True,
+            "robot_id": self.environment.robot_id,
+            "asset_sha256": sha256_file(self.environment.asset_path),
+            "logical_joints": list(self.joint_layout.logical_names),
+            "runtime_joints": list(self.joint_layout.runtime_names),
+            "runtime_dt_s": self.environment.dt,
+            "gravity": list(self.environment.gravity),
+            "num_substeps": self.environment.num_substeps,
+            "solver_iterations": self.environment.solver_iterations,
+            "solver_tolerance": self.environment.solver_tolerance,
+            "selected_joint_scoped": True,
+            "full_state_reset_per_episode": True,
+            "readback_parameters": ["stiffness", "damping", "effort_limit", "armature", "friction_nm"],
+            "candidate_sha256": self._last_verified_candidate_sha256,
+            "readback_values_sha256": self._last_readback_values_sha256,
+            "residual_sha256": self._loaded_residual_sha256,
+            **self._last_evaluation,
+        }
+
+    def evaluate(
+        self,
+        candidate,
+        episodes: Sequence,
+        objective_weights,
+        *,
+        phase: str = "unscoped",
+        run_id: str = "",
+        plan_sha256: str = "",
+        evidence_fingerprint: str = "",
+        mapping_fingerprint: str = "",
+    ):
         candidate = self._resolve_candidate(candidate)
         aggregate: list[dict[str, float]] = []
         per_episode: dict[str, dict[str, float]] = {}
@@ -134,6 +221,17 @@ class IsaacLabNewtonRuntime:
         means = {name: float(np.mean([item[name] for item in aggregate])) for name in names}
         if not stable:
             means["score"] += 1_000.0
+        self._last_evaluation = {
+            "evaluation_phase": phase,
+            "run_id": run_id,
+            "plan_sha256": plan_sha256,
+            "evidence_fingerprint": evidence_fingerprint,
+            "mapping_fingerprint": mapping_fingerprint,
+            "evidence_episodes": episode_inputs(episodes),
+            "result_sha256": evaluation_result_fingerprint(
+                score=means["score"], metrics=means, episodes=per_episode, stable=stable
+            ),
+        }
         return means["score"], means, per_episode, stable
 
     def _resolve_candidate(self, candidate: dict[str, float]) -> dict[str, float]:
@@ -143,45 +241,28 @@ class IsaacLabNewtonRuntime:
 
     def _apply_candidate(self, candidate: dict[str, float]) -> None:
         torch = self.torch
-        stiffness = torch.tensor(
-            [
-                [self.environment.base_stiffness * candidate["arm_stiffness_scale"]] * 5
-                + [self.environment.base_stiffness * candidate["gripper_stiffness_scale"]]
-            ],
-            dtype=torch.float32,
-            device=self.environment.device,
-        )
-        damping = torch.tensor(
-            [
-                [self.environment.base_damping * candidate["arm_damping_scale"]] * 5
-                + [self.environment.base_damping * candidate["gripper_damping_scale"]]
-            ],
-            dtype=torch.float32,
-            device=self.environment.device,
-        )
-        friction = torch.tensor(
-            [[candidate["arm_friction_nm"]] * 5 + [candidate["gripper_friction_nm"]]],
-            dtype=torch.float32,
-            device=self.environment.device,
-        )
-        effort = torch.tensor(
-            [
-                [self.environment.base_effort_limit * candidate["arm_effort_scale"]] * 5
-                + [self.environment.base_effort_limit * candidate["gripper_effort_scale"]]
-            ],
-            dtype=torch.float32,
-            device=self.environment.device,
-        )
-        armature = torch.tensor(
-            [[candidate["arm_armature"]] * 5 + [candidate["gripper_armature"]]],
-            dtype=torch.float32,
-            device=self.environment.device,
-        )
-        actuator = self.robot.actuators["so101"]
-        actuator.stiffness[:, self.joint_ids_tensor] = stiffness
-        actuator.damping[:, self.joint_ids_tensor] = damping
-        actuator.effort_limit[:, self.joint_ids_tensor] = effort
-        actuator.armature[:, self.joint_ids_tensor] = armature
+        properties = self._parameter_vectors(candidate)
+
+        def tensor(name: str):
+            return torch.as_tensor(
+                properties[name][None, :],
+                dtype=torch.float32,
+                device=self.environment.device,
+            )
+
+        stiffness = tensor("stiffness")
+        damping = tensor("damping")
+        friction = tensor("friction")
+        effort = tensor("effort")
+        armature = tensor("armature")
+        actuator = self.robot.actuators[self.actuator_name]
+        # Actuator tensors are actuator-local, even when its joints are a
+        # non-contiguous subset of the articulation. Global articulation IDs
+        # belong only on robot state/target/write APIs below.
+        actuator.stiffness[:, :] = stiffness
+        actuator.damping[:, :] = damping
+        actuator.effort_limit[:, :] = effort
+        actuator.armature[:, :] = armature
         self.robot.write_joint_armature_to_sim_index(
             armature=armature, env_ids=self.env_ids_tensor, joint_ids=self.joint_ids_tensor
         )
@@ -189,15 +270,73 @@ class IsaacLabNewtonRuntime:
             joint_friction_coeff=friction, env_ids=self.env_ids_tensor, joint_ids=self.joint_ids_tensor
         )
 
+    def _parameter_vectors(self, candidate: dict[str, float]) -> dict[str, np.ndarray]:
+        """Return ordered per-joint values without importing Isaac Lab or torch."""
+
+        return _joint_properties(
+            self.environment,
+            self.joint_layout,
+            candidate,
+            analytic=False,
+        )
+
+    def _verify_actuator_readback(self, candidate: dict[str, float]) -> None:
+        expected = self._parameter_vectors(candidate)
+        actuator = self.robot.actuators[self.actuator_name]
+        actual = {
+            "stiffness": actuator.stiffness[:, :],
+            "damping": actuator.damping[:, :],
+            "effort_limit": actuator.effort_limit[:, :],
+            # These two arrays are bound to Newton model attributes, rather
+            # than to the explicit actuator buffers that issued the writes.
+            "armature": self.robot.data.joint_armature.torch[:, self.joint_ids_tensor],
+            "friction_nm": self.robot.data.joint_friction_coeff.torch[:, self.joint_ids_tensor],
+        }
+        expected_by_surface = {
+            "stiffness": expected["stiffness"],
+            "damping": expected["damping"],
+            "effort_limit": expected["effort"],
+            "armature": expected["armature"],
+            "friction_nm": expected["friction"],
+        }
+        observed_by_surface: dict[str, list[float]] = {}
+        for name, values in actual.items():
+            observed = values.detach().cpu().numpy()[0]
+            if not np.allclose(observed, expected_by_surface[name], rtol=1e-5, atol=1e-7):
+                raise RuntimeError(f"Newton actuator {name} write/readback mismatch")
+            observed_by_surface[name] = observed.tolist()
+        self._last_verified_candidate_sha256 = parameter_fingerprint(candidate)
+        self._last_readback_values_sha256 = numeric_surface_fingerprint(observed_by_surface)
+
     def _rollout(self, candidate, episode):
         torch = self.torch
+        _validate_episode_width(episode, len(self.joint_layout.logical_names))
         self.robot.reset()
+        self.robot.write_root_pose_to_sim_index(
+            root_pose=self._canonical_root_pose,
+            env_ids=self.env_ids_tensor,
+        )
+        self.robot.write_root_velocity_to_sim_index(
+            root_velocity=self._canonical_root_velocity,
+            env_ids=self.env_ids_tensor,
+        )
+        self.robot.write_joint_state_to_sim_index(
+            position=self._canonical_joint_position,
+            velocity=self._canonical_joint_velocity,
+            env_ids=self.env_ids_tensor,
+        )
         self._apply_candidate(candidate)
+        self._verify_actuator_readback(candidate)
         initial_q = torch.as_tensor(episode.actual_q[0:1], dtype=torch.float32, device=self.environment.device)
         initial_dq = torch.as_tensor(episode.actual_dq[0:1], dtype=torch.float32, device=self.environment.device)
         self.robot.write_joint_state_to_sim_index(
             position=initial_q,
             velocity=initial_dq,
+            env_ids=self.env_ids_tensor,
+            joint_ids=self.joint_ids_tensor,
+        )
+        self.robot.set_joint_effort_target_index(
+            target=torch.zeros_like(initial_q),
             env_ids=self.env_ids_tensor,
             joint_ids=self.joint_ids_tensor,
         )
@@ -246,3 +385,15 @@ class IsaacLabNewtonRuntime:
         if getattr(self, "sim", None) is not None:
             self._sim_context_manager.__exit__(None, None, None)
             self.sim = None
+
+
+def _actuator_global_indices(value, *, total_joints: int) -> list[int]:
+    """Normalize Isaac Lab actuator joint indices for an exact scope check."""
+
+    if value is None:
+        raise RuntimeError("Calibration actuator did not expose joint_indices")
+    if isinstance(value, slice):
+        return list(range(total_joints))[value]
+    if hasattr(value, "detach"):
+        value = value.detach().cpu().tolist()
+    return [int(index) for index in value]

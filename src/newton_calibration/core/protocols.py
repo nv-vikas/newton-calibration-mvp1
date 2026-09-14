@@ -16,22 +16,38 @@ class ReplayEpisode(Protocol):
     actual_q: np.ndarray
     actual_dq: np.ndarray
     joints: list[str]
+    trial_id: str
+    source_sha256: str
 
 
 class EvidenceAdapter(Protocol):
     def inventory(self) -> dict[str, Any]: ...
 
-    def load_episode(self, name: str, *, dt: float, command_delay_s: float = 0.0) -> ReplayEpisode: ...
+    def load_episode(
+        self,
+        name: str,
+        *,
+        dt: float,
+        max_duration_s: float | None = None,
+    ) -> ReplayEpisode: ...
 
 
 class RuntimeAdapter(Protocol):
     def describe(self) -> EnvironmentSpec: ...
+
+    def attestation(self) -> dict[str, Any]: ...
 
     def evaluate(
         self,
         candidate: dict[str, float],
         episodes: Sequence[ReplayEpisode],
         objective_weights: dict[str, float],
+        *,
+        phase: str = "unscoped",
+        run_id: str = "",
+        plan_sha256: str = "",
+        evidence_fingerprint: str = "",
+        mapping_fingerprint: str = "",
     ) -> tuple[float, dict[str, float], dict[str, dict[str, float]], bool]: ...
 
     def close(self) -> None: ...

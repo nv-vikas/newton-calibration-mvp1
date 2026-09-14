@@ -23,6 +23,19 @@ def supported_parameter_names(environment: EnvironmentSpec) -> set[str]:
     """Return the parameter writers exposed by the selected thin adapter."""
     if environment.adapter not in {"isaaclab_newton", "analytic"}:
         return set()
+    if environment.profile_schema == "articulation-profile/v1":
+        names = {"command_delay_s"}
+        for group in environment.joint_groups:
+            names.update(
+                {
+                    f"{group}_stiffness_scale",
+                    f"{group}_damping_scale",
+                    f"{group}_armature",
+                    f"{group}_friction_nm",
+                    f"{group}_effort_scale",
+                }
+            )
+        return names
     return set(_SUPPORTED_PARAMETERS)
 
 
@@ -54,9 +67,7 @@ def validate_so101_asset(environment: EnvironmentSpec) -> list[str]:
     if stage is None:
         errors.append(f"OpenUSD could not open asset: {path}")
         return errors
-    revolute_joints = {
-        prim.GetName(): prim for prim in stage.Traverse() if prim.IsA(UsdPhysics.RevoluteJoint)
-    }
+    revolute_joints = {prim.GetName(): prim for prim in stage.Traverse() if prim.IsA(UsdPhysics.RevoluteJoint)}
     missing_joints = sorted(set(environment.joint_map.values()) - set(revolute_joints))
     if missing_joints:
         errors.append(f"USD is missing mapped revolute joints: {missing_joints}")

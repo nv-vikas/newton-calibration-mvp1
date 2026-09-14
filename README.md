@@ -1,17 +1,121 @@
-# Newton Calibration MVP1 — SO-101
+# `newton.calibration` MVP1 — articulated robots
 
-This repository implements the first calibration product slice for a robot arm and gripper:
+This repository implements the first calibration product slice for a supported
+position-controlled robot articulation. It is **not tied to SO-101**. The
+Anchor-Lab SO-101 data and USD remain the first real-data reference workflow.
 
-- real evidence: NVIDIA Anchor-Lab SO-101 50-motion Parquet logs;
+The generic product path provides:
+
+- a versioned real-evidence schema for arbitrary joint names and CSV/Parquet layouts;
+- deterministic real-coordinate → USD-DOF mapping, including units, sign, scale and zero offset;
 - user surface: Isaac Lab configuration plus five Python calls;
 - physics execution: kit-less Isaac Lab 3.0 with Newton/MuJoCo-Warp;
 - fitting: a replaceable, bounded diagonal CMA-ES plug-in;
 - validation: motions excluded from the fit objective, with explicit pass/fail gates;
-- output: a portable setup-scoped package with source USD, provenance layer, Isaac Lab actuator config, manifest, report, and complete job history.
+- output: a setup-scoped package with source USD, per-joint actuator patch, mapping, manifest, report, and complete job history.
 
-MVP1 calibrates free-space arm dynamics, command timing, and unloaded gripper motion. It does **not** claim contact fidelity, object dynamics, absolute gripping force, pick-and-place, or insertion transfer; those are outside this deliverable.
+MVP1 calibrates free-space articulation dynamics, command timing, and unloaded
+end-effector motion. It does **not** claim contact fidelity, object dynamics,
+absolute gripping force, pick-and-place, or insertion transfer.
 
-## Five-call Isaac Lab surface
+“Any USD” means any supported Newton-compatible, position-controlled,
+self-contained articulation for which the agent/user can confirm a one-to-one
+joint profile, controller baselines, and safe parameter bounds. MVP1 blocks a
+composed USD before fitting until dependency-closure vendoring is implemented.
+Multi-axis joints, closed loops, tendons/mimic mechanisms, Cartesian
+action pipelines, or unknown units/sign/zero conventions fail with actionable
+blockers instead of being guessed.
+
+## Generic five-call path
+
+The agent performs a deterministic preflight before the five scientific calls:
+
+```python
+from newton_calibration import (
+    JointBinding, LongFormSchema, SignalBinding, TabularJointEvidence,
+    bind_evidence_files, inspect_tabular_evidence, propose_joint_mapping,
+)
+from newton_calibration.isaaclab import ArticulationEnvCfg, tuning
+
+# 1. Inspect the user's explicitly split real logs and the USD.
+schema = LongFormSchema(
+    time_column="timestamp_ns", time_unit="ns", value_column="value",
+    joint_column="joint", signal_column="signal", field_column=None,
+)
+episodes = [
+    {"name": "chirp-a", "path": "chirp-a.parquet", "split": "train", "trial_id": "capture-001"},
+    {"name": "chirp-b", "path": "chirp-b.parquet", "split": "heldout", "trial_id": "capture-002"},
+]
+real = inspect_tabular_evidence(root="real-logs", episodes=episodes, schema=schema)
+usd = tuning.inspect_usd("robot.usd")
+proposal = propose_joint_mapping(real.source_joints, [joint.name for joint in usd.joints])
+
+# 2. The agent records confirmed units/sign/offset. It never optimizes this map.
+confirmed = (
+    JointBinding(
+        "driver_j1", "usd_joint_1", "rad", "rad",
+        sign=1, offset=0.0, transform_confirmed=True,
+    ),
+    JointBinding(
+        "driver_j2", "usd_joint_2", "rad", "rad",
+        sign=-1, offset=0.12, transform_confirmed=True,
+    ),
+)
+evidence_spec = bind_evidence_files(
+    root="real-logs", episodes=episodes, schema=schema,
+    joint_bindings=confirmed,
+    signal_bindings=(
+        SignalBinding("command", "command_q"),
+        SignalBinding("position", "actual_q"),
+        SignalBinding("velocity", "actual_dq"),
+    ),
+    # Set these only when collection metadata establishes the claim. Analyze
+    # blocks delay/effort fitting rather than inferring either from tracking error.
+    clock_synchronized=True,
+    effort_saturation_joints=("driver_j1", "driver_j2"),
+)
+env = ArticulationEnvCfg(
+    usd_path="robot.usd",
+    robot_id="customer-arm-cell-a",
+    joint_groups={"manipulator": ("driver_j1",), "end_effector": ("driver_j2",)},
+    joint_map={item.source_joint: item.usd_joint for item in confirmed},
+    profile_confirmed=True,
+    controller_profile_confirmed=True,
+    controller_profile_source="Isaac Lab task config commit abc123",
+    # Per-joint Isaac Lab baselines and robot-specific armature/friction bounds
+    # come from the USD, task config, OEM data, or explicit user confirmation.
+    base_stiffness_by_joint={"driver_j1": 80.0, "driver_j2": 25.0},
+    base_damping_by_joint={"driver_j1": 4.0, "driver_j2": 1.0},
+    base_effort_limit_by_joint={"driver_j1": 15.0, "driver_j2": 4.0},
+    parameter_bounds={
+        "manipulator_effort_scale": (0.25, 1.0, 0.75),
+        "manipulator_armature": (0.0, 0.5, 0.02),
+        "manipulator_friction_nm": (0.0, 1.0, 0.05),
+        "end_effector_effort_scale": (0.25, 1.0, 0.75),
+        "end_effector_armature": (0.0, 0.1, 0.005),
+        "end_effector_friction_nm": (0.0, 0.3, 0.01),
+    },
+)
+
+# The stable product lifecycle remains five calls.
+analysis = tuning.analyze(env=env, evidence=TabularJointEvidence(evidence_spec))
+plan = tuning.plan(analysis)
+fit = tuning.fit(plan)
+validation = tuning.validate(fit)
+package = tuning.write(validation, output="packages/customer-arm-cell-a")
+```
+
+`analysis.mapping_report` and `analysis.readiness` tell the calibration agent
+exactly what it must resolve. The locked plan persists the evidence schema,
+file hashes, split, joint order, affine coordinate transforms, USD mapping,
+clock/saturation qualifications, recipe, bounds, optimizer and runtime
+settings. The binding schema is `bound-evidence@2`; older bindings must be
+recreated so independent trials and coordinate transforms are explicitly
+confirmed. Resume refuses any drift. `tuning.inspect_evidence(...)` reports
+measured dynamic-excitation and reversal coverage per source joint so the
+agent can request a safer trajectory instead of tuning an unsupported term.
+
+## SO-101 compatibility preset
 
 ```python
 from newton_calibration.isaaclab import SO101EnvCfg, tuning
@@ -32,13 +136,17 @@ validation = tuning.validate(fit_run)
 package = tuning.write(validation, output="packages/so101")
 ```
 
-The five functions are deterministic product APIs. A future calibration agent can guide or monitor these same calls without becoming a dependency of the core.
+The five functions are deterministic product APIs. A calibration agent can
+inspect, guide, execute, resume, and explain these same calls without becoming
+a dependency of the core; Minjae's agent can use this surface and supply its
+optimizer through the plug-in contract described below.
 
 ## Load a validated package
 
-The package loader verifies activation status, held-out gates, the packaged USD
-hash, parameter bounds and ownership, YAML/manifest consistency, runtime and
-solver settings, and command-delay quantization before returning a configuration.
+The package loader verifies activation status, both held-out baseline and
+calibrated executions, the packaged USD hash, controller provenance, parameter
+bounds and ownership, YAML/manifest consistency, runtime/solver settings, the
+hashed job ledger, and command-delay quantization before returning a configuration.
 It deliberately uses the relocatable USD copied into the package rather than
 the original absolute asset path.
 
@@ -59,6 +167,12 @@ env_cfg = SO101EnvCfg.from_calibration(
     expected_manifest_sha256="<digest from the producer>",
 )
 ```
+
+For robot-neutral v2 packages, use `VerifiedCalibrationPackage.open(...)` or
+`ArticulationEnvCfg.from_calibration(...)`. A separately supplied manifest
+digest is the trust anchor when a package crosses machines; the internal
+runtime attestations establish cross-file and execution consistency, not a
+cryptographic issuer identity.
 
 All 11 values remain attached to `env_cfg.calibration_parameters`; this is a
 serializable toolkit replay configuration, not a Gym environment. The Newton
@@ -141,6 +255,27 @@ docker run --rm --gpus all \
   --asset /workspace/data/anchor-lab/robot_assets/so101_no_camera_new_calib.usd \
   --output /workspace/packages/newton-e2e-smoke
 ```
+
+The reference image can also exercise the robot-neutral runtime boundary
+without pretending that Anchor-Lab proves every generic recipe parameter:
+
+```bash
+docker run --rm --gpus all --network none \
+  --entrypoint /opt/venv/bin/python \
+  -v "$PWD/data:/workspace/data:ro" \
+  newton-calibration-mvp1:kitless \
+  /opt/newton-calibration/scripts/e2e_generic_newton_boundary.py \
+  --evidence /workspace/data/anchor-lab \
+  --asset /workspace/data/anchor-lab/robot_assets/so101_no_camera_new_calib.usd
+```
+
+That check maps four real evidence coordinates onto non-contiguous runtime
+DOFs, leaves two USD DOFs passive, runs episodes in both orders, and verifies
+full-articulation reset plus runtime parameter readback. It is a runtime and
+mapping qualification—not a second robot calibration and not an activatable
+generic package. A generic five-call job still requires the evidence declared
+by its recipe, including independent saturation evidence when effort scale is
+tuned.
 
 For a fast contract smoke test, pass `--runtime analytic --device cpu --generations 2 --population 4`. That backend tests the product wiring only; validation evidence is publishable only when `runtime=isaaclab_newton`.
 

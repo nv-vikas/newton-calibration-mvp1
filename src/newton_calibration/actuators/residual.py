@@ -23,6 +23,10 @@ class LinearHistoryResidual:
             raise ValueError(f"Residual weights must have shape {expected}, got {self.weights.shape}")
         if self.clip_nm.shape != (len(self.joint_names),):
             raise ValueError("Residual clip_nm must contain one value per joint")
+        if not np.isfinite(self.weights).all() or not np.isfinite(self.clip_nm).all():
+            raise ValueError("Residual weights and clip_nm must contain only finite values")
+        if np.any(self.clip_nm < 0.0):
+            raise ValueError("Residual clip_nm values must be non-negative")
         self._previous_command = np.zeros(len(self.joint_names), dtype=np.float64)
 
     def reset(self, command: np.ndarray) -> None:

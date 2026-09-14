@@ -12,6 +12,7 @@ import yaml
 from newton_calibration.adapters.surface import (
     CalibrationPackageLoadError,
     SO101EnvCfg,
+    VerifiedCalibrationPackage,
     VerifiedSO101Package,
 )
 
@@ -184,10 +185,14 @@ def _replace_manifest(root: Path, manifest: dict) -> None:
     (root / "manifest.json").write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
 
 
+def _open(root: Path) -> VerifiedSO101Package:
+    return VerifiedSO101Package.open(root, expected_manifest_sha256=_sha256(root / "manifest.json"))
+
+
 def test_loads_relocated_package_and_reconstructs_canonical_joint_order(tmp_path):
     root = _write_fixture(tmp_path)
 
-    package = VerifiedSO101Package.open(root)
+    package = _open(root)
     env = package.to_env_cfg(device="cuda:7")
     vectors = package.actuator.joint_vectors()
 
@@ -211,7 +216,11 @@ def test_env_classmethod_is_kitless_and_preserves_locked_physics(tmp_path):
     root = _write_fixture(tmp_path)
     before = {name for name in sys.modules if name == "isaaclab" or name.startswith("isaaclab.")}
 
-    env = SO101EnvCfg.from_calibration(root, device="cuda:1")
+    env = SO101EnvCfg.from_calibration(
+        root,
+        device="cuda:1",
+        expected_manifest_sha256=_sha256(root / "manifest.json"),
+    )
 
     after = {name for name in sys.modules if name == "isaaclab" or name.startswith("isaaclab.")}
     assert after == before
@@ -223,9 +232,16 @@ def test_env_classmethod_is_kitless_and_preserves_locked_physics(tmp_path):
     assert env.device == "cuda:1"
 
 
+def test_unattested_v1_requires_trust_on_every_public_loading_surface(tmp_path):
+    root = _write_fixture(tmp_path)
+    for loader in (VerifiedSO101Package.open, VerifiedCalibrationPackage.open, SO101EnvCfg.from_calibration):
+        with pytest.raises(CalibrationPackageLoadError, match="Legacy unattested v1"):
+            loader(root)
+
+
 def test_environment_reverification_rejects_locked_field_override(tmp_path):
     root = _write_fixture(tmp_path)
-    package = VerifiedSO101Package.open(root)
+    package = _open(root)
     environment = package.to_env_cfg().describe()
     package.assert_matches_environment(environment)
 
@@ -240,7 +256,7 @@ def test_environment_reverification_rejects_locked_field_override(tmp_path):
 
 def test_trusted_manifest_digest_detects_manifest_replacement(tmp_path):
     root = _write_fixture(tmp_path)
-    original = VerifiedSO101Package.open(root)
+    original = _open(root)
     manifest = _manifest(root)
     manifest["scope"] = "rewritten scope"
     _replace_manifest(root, manifest)
@@ -257,7 +273,7 @@ def test_legacy_portable_package_requires_external_trust_anchor(tmp_path):
     validation_path.write_text(json.dumps(validation), encoding="utf-8")
     trusted_digest = _sha256(root / "manifest.json")
 
-    with pytest.raises(CalibrationPackageLoadError, match="Legacy portable package"):
+    with pytest.raises(CalibrationPackageLoadError, match="Legacy unattested v1"):
         VerifiedSO101Package.open(root)
 
     package = VerifiedSO101Package.open(root, expected_manifest_sha256=trusted_digest)
@@ -285,7 +301,7 @@ def test_rejects_nonactivatable_or_incompatible_manifest(tmp_path, mutation, mes
     _replace_manifest(root, manifest)
 
     with pytest.raises(CalibrationPackageLoadError, match=message):
-        VerifiedSO101Package.open(root)
+        _open(root)
 
 
 def test_rejects_asset_drift(tmp_path):
@@ -293,7 +309,7 @@ def test_rejects_asset_drift(tmp_path):
     (root / "so101.usda").write_text("#usda 1.0\n# modified\n", encoding="utf-8")
 
     with pytest.raises(CalibrationPackageLoadError, match="source USD"):
-        VerifiedSO101Package.open(root)
+        _open(root)
 
 
 def test_rejects_yaml_projection_drift(tmp_path):
@@ -303,7 +319,7 @@ def test_rejects_yaml_projection_drift(tmp_path):
     (root / "isaaclab_actuator.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
 
     with pytest.raises(CalibrationPackageLoadError, match="gripper_damping mismatch"):
-        VerifiedSO101Package.open(root)
+        _open(root)
 
 
 def test_rejects_validation_drift(tmp_path):
@@ -313,7 +329,7 @@ def test_rejects_validation_drift(tmp_path):
     (root / "validation.json").write_text(json.dumps(validation), encoding="utf-8")
 
     with pytest.raises(CalibrationPackageLoadError, match="Validation must contain exactly"):
-        VerifiedSO101Package.open(root)
+        _open(root)
 
 
 def test_rejects_manifest_runtime_not_used_for_validation(tmp_path):
@@ -323,7 +339,7 @@ def test_rejects_manifest_runtime_not_used_for_validation(tmp_path):
     _replace_manifest(root, manifest)
 
     with pytest.raises(CalibrationPackageLoadError, match="runtime/environment"):
-        VerifiedSO101Package.open(root)
+        _open(root)
 
 
 def test_rejects_coordinated_asset_and_self_hash_substitution(tmp_path):
@@ -335,7 +351,7 @@ def test_rejects_coordinated_asset_and_self_hash_substitution(tmp_path):
     _replace_manifest(root, manifest)
 
     with pytest.raises(CalibrationPackageLoadError, match="Validation asset fingerprint"):
-        VerifiedSO101Package.open(root)
+        _open(root)
 
 
 def test_rejects_missing_fit_or_validation_gate(tmp_path):
@@ -345,7 +361,7 @@ def test_rejects_missing_fit_or_validation_gate(tmp_path):
     validation.pop("fit")
     validation_path.write_text(json.dumps(validation), encoding="utf-8")
     with pytest.raises(CalibrationPackageLoadError, match="missing its fit record"):
-        VerifiedSO101Package.open(root)
+        _open(root)
 
     root = _write_fixture(tmp_path / "second")
     validation_path = root / "validation.json"
@@ -353,7 +369,7 @@ def test_rejects_missing_fit_or_validation_gate(tmp_path):
     validation["gates"].pop("minimum_improvement")
     validation_path.write_text(json.dumps(validation), encoding="utf-8")
     with pytest.raises(CalibrationPackageLoadError, match="exactly the passing MVP1 gates"):
-        VerifiedSO101Package.open(root)
+        _open(root)
 
 
 def test_rejects_artifact_traversal_and_symlinks(tmp_path):
@@ -363,13 +379,13 @@ def test_rejects_artifact_traversal_and_symlinks(tmp_path):
     _replace_manifest(root, manifest)
     (tmp_path / "outside.usda").write_text("#usda 1.0\n", encoding="utf-8")
     with pytest.raises(CalibrationPackageLoadError, match="confined"):
-        VerifiedSO101Package.open(root)
+        _open(root)
 
     root = _write_fixture(tmp_path / "second")
     (root / "so101.usda").unlink()
     (root / "so101.usda").symlink_to(tmp_path / "outside.usda")
     with pytest.raises(CalibrationPackageLoadError, match="symbolic link"):
-        VerifiedSO101Package.open(root)
+        _open(root)
 
 
 def test_rejects_duplicate_yaml_keys(tmp_path):
@@ -378,7 +394,7 @@ def test_rejects_duplicate_yaml_keys(tmp_path):
     yaml_path.write_text(yaml_path.read_text(encoding="utf-8") + "recipe: duplicate\n", encoding="utf-8")
 
     with pytest.raises(CalibrationPackageLoadError, match="Duplicate YAML key"):
-        VerifiedSO101Package.open(root)
+        _open(root)
 
 
 def test_rejects_parameter_assigned_to_two_surfaces(tmp_path):
@@ -388,7 +404,7 @@ def test_rejects_parameter_assigned_to_two_surfaces(tmp_path):
     _replace_manifest(root, manifest)
 
     with pytest.raises(CalibrationPackageLoadError, match="does not match the supported package binding"):
-        VerifiedSO101Package.open(root)
+        _open(root)
 
 
 def test_rejects_legacy_nonportable_v1_package(tmp_path):
@@ -399,7 +415,7 @@ def test_rejects_legacy_nonportable_v1_package(tmp_path):
     _replace_manifest(root, manifest)
 
     with pytest.raises(CalibrationPackageLoadError, match="migrate legacy packages"):
-        VerifiedSO101Package.open(root)
+        _open(root)
 
 
 def test_loads_and_hash_checks_optional_actuator_residual(tmp_path):
@@ -426,10 +442,10 @@ def test_loads_and_hash_checks_optional_actuator_residual(tmp_path):
     validation["fit"]["plan"]["environment"]["residual_model_path"] = "/stale/original/residual.json"
     validation_path.write_text(json.dumps(validation), encoding="utf-8")
 
-    package = VerifiedSO101Package.open(root)
+    package = _open(root)
     assert package.residual_model_path == residual_path
     assert package.to_env_cfg().residual_model_path == str(residual_path)
 
     residual_path.write_text("{}", encoding="utf-8")
     with pytest.raises(CalibrationPackageLoadError, match="residual does not match"):
-        VerifiedSO101Package.open(root)
+        _open(root)

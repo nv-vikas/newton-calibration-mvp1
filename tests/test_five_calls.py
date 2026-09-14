@@ -180,7 +180,7 @@ def test_resume_rejects_changed_external_optimizer_configuration(tmp_path):
         optimizer={**calibration_plan.optimizer, "options": {"mode": "changed"}},
     )
 
-    with pytest.raises(RuntimeError, match="execution fingerprint mismatch"):
+    with pytest.raises(RuntimeError, match="Calibration plan changed"):
         tuning.fit(changed_plan, generations=2, population=4, resume=True)
 
 
@@ -189,11 +189,11 @@ def test_resume_rejects_changed_evidence_or_run_identity(tmp_path):
     calibration_plan = tuning.plan(analysis)
     tuning.fit(calibration_plan, generations=1, population=4, resume=False)
 
-    for changed_plan, message in (
-        (replace(calibration_plan, evidence_fingerprint="different-evidence"), "Evidence fingerprint changed"),
-        (replace(calibration_plan, run_id="different-run"), "run_id mismatch"),
+    for changed_plan in (
+        replace(calibration_plan, evidence_fingerprint="different-evidence"),
+        replace(calibration_plan, run_id="different-run"),
     ):
-        with pytest.raises(RuntimeError, match=message):
+        with pytest.raises(RuntimeError, match="Calibration plan changed"):
             tuning.fit(changed_plan, generations=2, population=4, resume=True)
 
 
