@@ -41,6 +41,7 @@ class AnalysisResult:
     evidence_uri: str
     evidence_revision: str
     evidence_fingerprint: str
+    asset_fingerprint: str
     environment: EnvironmentSpec
     train_episodes: list[str]
     heldout_episodes: list[str]
@@ -62,6 +63,7 @@ class CalibrationPlan:
     evidence_uri: str
     evidence_revision: str
     evidence_fingerprint: str
+    asset_fingerprint: str
     environment: EnvironmentSpec
     parameters: list[ParameterSpec]
     train_episodes: list[str]
@@ -94,6 +96,7 @@ class FitResult:
     history_path: str
     completed_generations: int
     backend: str
+    optimizer: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

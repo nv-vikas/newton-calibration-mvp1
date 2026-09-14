@@ -8,6 +8,7 @@ from newton_calibration.adapters.evidence import fetch_anchor_lab_so101
 from newton_calibration.adapters.surface import SO101EnvCfg
 from newton_calibration.core.models import jsonable
 from newton_calibration.isaaclab import tuning
+from newton_calibration.optimizers import list_optimizers
 
 
 def main() -> None:
@@ -16,6 +17,7 @@ def main() -> None:
     fetch_parser = subparsers.add_parser("fetch", help="download SO-101 Anchor-Lab evidence and USD")
     fetch_parser.add_argument("--output", default="data/anchor-lab")
     fetch_parser.add_argument("--revision", default="647edd5787cd764cdc041103ad282dc59214d919")
+    subparsers.add_parser("optimizers", help="list installed optimizer plug-ins and versions")
 
     inspect_parser = subparsers.add_parser("inspect", help="execute analyze + plan without starting physics")
     _add_job_arguments(inspect_parser, include_fit=False)
@@ -26,6 +28,9 @@ def main() -> None:
     args = parser.parse_args()
     if args.command == "fetch":
         print(json.dumps(fetch_anchor_lab_so101(args.output, args.revision), indent=2))
+        return
+    if args.command == "optimizers":
+        print(json.dumps(list_optimizers(), indent=2, sort_keys=True))
         return
     env = SO101EnvCfg(
         usd_path=str(Path(args.asset).expanduser().resolve()),
@@ -39,7 +44,11 @@ def main() -> None:
         evidence_revision=args.revision,
         workdir=args.workdir,
     )
-    calibration_plan = tuning.plan(analysis)
+    calibration_plan = tuning.plan(
+        analysis,
+        optimizer=args.optimizer,
+        optimizer_options=args.optimizer_options_json,
+    )
     if args.command == "inspect":
         print(
             json.dumps(
@@ -70,11 +79,31 @@ def _add_job_arguments(parser: argparse.ArgumentParser, *, include_fit: bool) ->
     parser.add_argument("--runtime", choices=["isaaclab_newton", "analytic"], default="isaaclab_newton")
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--residual-model")
+    parser.add_argument(
+        "--optimizer",
+        help="registered optimizer name; defaults to the recipe optimizer",
+    )
+    parser.add_argument(
+        "--optimizer-options-json",
+        type=_json_object,
+        metavar="JSON",
+        help="optimizer-specific JSON object locked into the calibration plan",
+    )
     if include_fit:
         parser.add_argument("--output", default="packages/so101")
         parser.add_argument("--generations", type=int)
         parser.add_argument("--population", type=int)
         parser.add_argument("--no-resume", action="store_true")
+
+
+def _json_object(value: str) -> dict:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise argparse.ArgumentTypeError(f"invalid optimizer JSON: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise argparse.ArgumentTypeError("optimizer options must be a JSON object")
+    return parsed
 
 
 if __name__ == "__main__":

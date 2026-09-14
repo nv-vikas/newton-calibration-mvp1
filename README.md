@@ -47,6 +47,33 @@ An actuator-level residual is available in MVP1 by setting `residual_model_path`
 | Isaac Lab adapter | Keeps the core independent of backend imports and exposes a serializable environment spec. |
 | Package writer | Records scope, provenance, candidate history, calibrated values, and held-out proof. |
 
+## Optimizer plug-ins for Minjae's agent
+
+`fit()` resolves its optimizer through a versioned registry. The built-in
+`diagonal-cma-es` remains the default, while an installed package can expose
+Minjae's optimizer through the `newton_calibration.optimizers` Python entry-point
+group. The agent selects a registered optimizer when it creates the locked plan;
+the optimizer proposes candidates, but the toolkit alone validates bounds, runs
+Newton, computes scores, checkpoints state, and performs held-out validation.
+Each completed generation is committed as an atomic, hashed record, so an
+agent can safely resume after interruption without mixing plans or duplicating
+candidate history.
+
+```python
+calibration_plan = tuning.plan(
+    analysis,
+    optimizer="minjae-nvopt.v1",
+    optimizer_options={"strategy": "adaptive-search"},
+)
+fit_run = tuning.fit(calibration_plan)
+```
+
+The repository provides the integration contract and conformance tests, not
+Minjae's proprietary implementation. Selecting an optimizer whose provider is
+not installed fails explicitly and lists the available plug-ins. See
+[`docs/optimizer_plugins.md`](docs/optimizer_plugins.md) for the provider-side
+contract and packaging example.
+
 ## Dataset and asset policy
 
 The adapter excludes `present_load_raw` and `tau_abs` from the primary objective because Anchor-Lab does not provide a complete load conversion and `tau_abs` discards sign. Joint position and velocity are treated as radians and radians/s, matching the released SO-101 files.

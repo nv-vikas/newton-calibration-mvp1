@@ -2,23 +2,29 @@ from __future__ import annotations
 
 import json
 import shutil
-import hashlib
 from pathlib import Path
 
-from newton_calibration.core.io import write_json
+from newton_calibration.core.io import sha256_file, write_json
 from newton_calibration.core.models import CalibrationPackage, ValidationResult, jsonable
 
 
 def write_package(validation: ValidationResult, output: str | Path) -> CalibrationPackage:
     output_dir = Path(output).expanduser().resolve()
+    if output_dir.exists() and (not output_dir.is_dir() or any(output_dir.iterdir())):
+        raise FileExistsError(f"Calibration package destination is not empty: {output_dir}; use a new output directory")
     output_dir.mkdir(parents=True, exist_ok=True)
     plan = validation.fit.plan
     params = validation.fit.best.parameters
     source_asset = Path(plan.environment.asset_path).expanduser().resolve()
     if not source_asset.is_file():
         raise FileNotFoundError(f"Cannot package missing source asset: {source_asset}")
+    current_asset_fingerprint = sha256_file(source_asset)
+    if current_asset_fingerprint != plan.asset_fingerprint:
+        raise RuntimeError("USD asset fingerprint changed after calibration; validate a new plan before packaging")
     packaged_asset = output_dir / source_asset.name
     shutil.copy2(source_asset, packaged_asset)
+    if sha256_file(packaged_asset) != current_asset_fingerprint:
+        raise RuntimeError("USD asset changed while the calibration package was being created")
 
     job_dir = output_dir / "job"
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -37,13 +43,10 @@ def write_package(validation: ValidationResult, output: str | Path) -> Calibrati
         if not source.is_file():
             raise FileNotFoundError(f"Cannot package missing durable job record: {source}")
         shutil.copy2(source, job_dir / name)
-
-    def sha256(path: Path) -> str:
-        digest = hashlib.sha256()
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
+    generation_records = run_dir / "fit-generations"
+    if not generation_records.is_dir() or not any(generation_records.glob("*.json")):
+        raise FileNotFoundError(f"Cannot package missing authoritative fit generations: {generation_records}")
+    shutil.copytree(generation_records, job_dir / "fit-generations")
 
     delay_steps = max(0, round(params["command_delay_s"] / plan.environment.dt))
     effective_delay_s = delay_steps * plan.environment.dt
@@ -53,9 +56,9 @@ def write_package(validation: ValidationResult, output: str | Path) -> Calibrati
         "(\n"
         f"    subLayers = [@./{packaged_asset.name}@]\n"
         "    customLayerData = {\n"
-        f"        string newtonCalibrationRun = \"{validation.run_id}\"\n"
-        "        string newtonCalibrationManifest = \"manifest.json\"\n"
-        "        string newtonCalibrationScope = \"SO-101 free-space arm and unloaded gripper actuation\"\n"
+        f'        string newtonCalibrationRun = "{validation.run_id}"\n'
+        '        string newtonCalibrationManifest = "manifest.json"\n'
+        '        string newtonCalibrationScope = "SO-101 free-space arm and unloaded gripper actuation"\n'
         "    }\n"
         ")\n",
         encoding="utf-8",
@@ -101,13 +104,14 @@ def write_package(validation: ValidationResult, output: str | Path) -> Calibrati
         },
         "inputs": {
             "asset": plan.environment.asset_path,
-            "asset_sha256": sha256(source_asset),
+            "asset_sha256": current_asset_fingerprint,
             "evidence": plan.evidence_uri,
             "evidence_revision": plan.evidence_revision,
             "evidence_fingerprint": plan.evidence_fingerprint,
         },
         "runtime": jsonable(plan.environment),
         "recipe": plan.recipe,
+        "optimizer": validation.fit.optimizer,
         "parameters": params,
         "parameter_application": {
             "isaaclab_explicit_pd": [
@@ -139,6 +143,7 @@ def write_package(validation: ValidationResult, output: str | Path) -> Calibrati
             "validation": validation_path.name,
             "job_records": "job/",
             "candidate_history": "job/candidate-history.jsonl",
+            "optimizer_generation_records": "job/fit-generations/",
             "actuator_residual": residual_artifact,
         },
     }
@@ -156,6 +161,9 @@ def write_package(validation: ValidationResult, output: str | Path) -> Calibrati
         f"- Held-out result: **{'PASS' if validation.passed else 'FAIL'}**\n"
         f"- Weighted-error improvement: **{validation.improvement_pct:.1f}%**\n"
         f"- Runtime: `{plan.environment.adapter}`\n"
+        f"- Optimizer: `{validation.fit.optimizer.get('name', plan.optimizer.get('name', 'unknown'))}` "
+        f"(`{validation.fit.optimizer.get('version', 'unknown')}`, provider "
+        f"`{validation.fit.optimizer.get('provider', 'unknown')}`)\n"
         f"- Evidence revision: `{plan.evidence_revision}`\n\n"
         "## Product claim\n\n"
         f"{claim} It does not validate absolute grasp force, "

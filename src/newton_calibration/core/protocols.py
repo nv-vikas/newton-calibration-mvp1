@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Any, Protocol
+from collections.abc import Mapping, Sequence
+from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 
@@ -37,7 +37,15 @@ class RuntimeAdapter(Protocol):
     def close(self) -> None: ...
 
 
+@runtime_checkable
 class OptimizerPlugin(Protocol):
+    """Stateful ask/tell optimizer used by the deterministic fit runner.
+
+    Optimizer state must be JSON serializable.  The runner owns candidate
+    evaluation and checkpoint persistence; a plug-in only proposes candidates
+    and learns from the scores returned to it.
+    """
+
     def ask(self) -> list[dict[str, float]]: ...
 
     def tell(self, candidates: Sequence[dict[str, float]], scores: Sequence[float]) -> None: ...
@@ -47,3 +55,7 @@ class OptimizerPlugin(Protocol):
 
     @property
     def best(self) -> tuple[dict[str, float], float] | None: ...
+
+    def state_dict(self) -> dict[str, Any]: ...
+
+    def load_state_dict(self, state: Mapping[str, Any]) -> None: ...
