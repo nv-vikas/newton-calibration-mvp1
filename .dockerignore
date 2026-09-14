@@ -1,0 +1,17 @@
+.git
+.venv
+.video-deps
+.pytest_cache
+**/__pycache__
+data
+runs
+runs-smoke
+packages
+deliverables
+output
+video_data
+videos
+dist
+build
+*.egg-info
+.DS_Store

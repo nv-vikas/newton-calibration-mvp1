@@ -1,0 +1,51 @@
+FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
+
+ARG ISAACLAB_COMMIT=ffff603eafc6b74264a5261cc0183d6a65390d78
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential \
+      ca-certificates \
+      cmake \
+      git \
+      libgl1 \
+      libglib2.0-0 \
+      libsm6 \
+      libudev-dev \
+      libusb-1.0-0 \
+      libx11-6 \
+      libxi6 \
+      libxrender1 \
+      ninja-build \
+      python3.12 \
+      python3.12-dev \
+      python3.12-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3.12 -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir uv
+
+RUN git clone --filter=blob:none https://github.com/isaac-sim/IsaacLab.git /opt/IsaacLab \
+    && git -C /opt/IsaacLab fetch --depth 1 origin ${ISAACLAB_COMMIT} \
+    && git -C /opt/IsaacLab checkout --detach ${ISAACLAB_COMMIT}
+
+RUN /opt/venv/bin/uv pip install --python /opt/venv/bin/python \
+      torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 \
+      --index-url https://download.pytorch.org/whl/cu128 \
+    && /opt/venv/bin/uv pip install --python /opt/venv/bin/python \
+      -e /opt/IsaacLab/source/isaaclab \
+      -e /opt/IsaacLab/source/isaaclab_physx \
+      -e '/opt/IsaacLab/source/isaaclab_newton[all]'
+
+WORKDIR /opt/newton-calibration
+COPY pyproject.toml README.md ./
+COPY src ./src
+COPY configs ./configs
+COPY scripts ./scripts
+RUN /opt/venv/bin/uv pip install --python /opt/venv/bin/python .
+
+WORKDIR /workspace
+ENTRYPOINT ["/opt/venv/bin/python", "-m", "newton_calibration.cli"]
+CMD ["--help"]

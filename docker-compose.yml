@@ -1,0 +1,12 @@
+services:
+  calibration:
+    build:
+      context: .
+      dockerfile: Dockerfile.kitless
+    image: newton-calibration-mvp1:kitless
+    gpus: all
+    ipc: host
+    volumes:
+      - ./data:/workspace/data
+      - ./runs:/workspace/runs
+      - ./packages:/workspace/packages

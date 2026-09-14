@@ -1,0 +1,13 @@
+{
+  "schema": "newton.calibration.actuator-residual/v1",
+  "joint_names": ["rotation", "pitch", "elbow", "wrist_pitch", "wrist_roll", "jaw"],
+  "weights": [
+    [0.0, 0.0, 0.0, 0.0],
+    [0.0, 0.0, 0.0, 0.0],
+    [0.0, 0.0, 0.0, 0.0],
+    [0.0, 0.0, 0.0, 0.0],
+    [0.0, 0.0, 0.0, 0.0],
+    [0.0, 0.0, 0.0, 0.0]
+  ],
+  "clip_nm": [0.5, 0.5, 0.5, 0.3, 0.3, 0.2]
+}

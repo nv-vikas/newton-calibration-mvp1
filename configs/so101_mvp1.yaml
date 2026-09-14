@@ -1,0 +1,19 @@
+schema: newton.calibration.job/v1
+recipe: so101_actuator_dynamics.v1
+surface: isaac_lab
+runtime: newton_mjwarp
+dataset: nvidia/Anchor-Lab
+dataset_revision: 647edd5787cd764cdc041103ad282dc59214d919
+dataset_path: data/so101_arm_50motion
+asset_path: robot_assets/so101_no_camera_new_calib.usd
+objective:
+  position_nrmse: 0.60
+  velocity_nrmse: 0.15
+  phase_error_s: 0.15
+  hold_nrmse: 0.10
+validation:
+  minimum_improvement_pct: 30
+  maximum_episode_regression_pct: 10
+scope:
+  included: free-space arm and unloaded gripper actuation
+  excluded: absolute gripping force, contact, object dynamics, task transfer

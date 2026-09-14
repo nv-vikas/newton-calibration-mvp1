@@ -1,0 +1,20 @@
+FROM newton-calibration-mvp1:latest
+
+USER root
+WORKDIR /opt/newton-calibration-asset-prep
+
+# Register the Newton typed mesh-collision API during deterministic USD
+# authoring.  CoACD is used only in this image; the runtime never downloads or
+# imports it.
+ENV NEWTON_USD_SCHEMA_PATH=/isaac-sim/exts/omni.usd.schema.newton/usd/schema/newton/newton_usd_schemas
+ENV OMP_NUM_THREADS=1
+
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN ${ISAACLAB_PATH}/isaaclab.sh -p -m pip install --no-cache-dir '.[asset-prep]'
+
+COPY scripts ./scripts
+
+WORKDIR /workspace/newton-calibration-mvp1
+ENTRYPOINT ["/workspace/isaaclab/isaaclab.sh", "-p"]
+CMD ["scripts/build_so101_gripper_collision_overlay.py", "--help"]
