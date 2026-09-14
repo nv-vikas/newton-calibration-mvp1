@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 
 import numpy as np
 
@@ -8,12 +9,22 @@ from newton_calibration.actuators import load_residual
 from newton_calibration.core.models import EnvironmentSpec
 from newton_calibration.validation.metrics import compare_trajectories
 
+_SO101_JOINT_ORDER = ("rotation", "pitch", "elbow", "wrist_pitch", "wrist_roll", "jaw")
+
 
 class IsaacLabNewtonRuntime:
     """Thin Isaac Lab adapter that replays real commands in the Newton runtime."""
 
     def __init__(self, environment: EnvironmentSpec):
         self.environment = environment
+        if environment.calibration_manifest_path:
+            from newton_calibration.adapters.surface.package_loader import VerifiedSO101Package
+
+            verified = VerifiedSO101Package.open(
+                Path(environment.calibration_manifest_path).parent,
+                expected_manifest_sha256=environment.calibration_manifest_sha256,
+            )
+            verified.assert_matches_environment(environment)
         self._build()
 
     def _build(self) -> None:
@@ -83,7 +94,7 @@ class IsaacLabNewtonRuntime:
         self.sim.reset()
         if not self.robot.is_initialized:
             raise RuntimeError("SO-101 articulation did not initialize in Newton")
-        desired = [self.environment.joint_map[name] for name in self.environment.joint_map]
+        desired = [self.environment.joint_map[name] for name in _SO101_JOINT_ORDER]
         self.joint_ids, matched = self.robot.find_joints(desired, preserve_order=True)
         if matched != desired:
             raise RuntimeError(f"SO-101 joint mapping mismatch. Expected {desired}, found {matched}")
@@ -91,13 +102,16 @@ class IsaacLabNewtonRuntime:
         self.env_ids_tensor = torch.tensor([0], device=self.environment.device, dtype=torch.long)
         self.residual = load_residual(
             self.environment.residual_model_path,
-            list(self.environment.joint_map),
+            list(_SO101_JOINT_ORDER),
         )
+        if self.environment.calibration_parameters:
+            self._apply_candidate(dict(self.environment.calibration_parameters))
 
     def describe(self) -> EnvironmentSpec:
         return self.environment
 
     def evaluate(self, candidate, episodes: Sequence, objective_weights):
+        candidate = self._resolve_candidate(candidate)
         aggregate: list[dict[str, float]] = []
         per_episode: dict[str, dict[str, float]] = {}
         stable = True
@@ -122,17 +136,26 @@ class IsaacLabNewtonRuntime:
             means["score"] += 1_000.0
         return means["score"], means, per_episode, stable
 
+    def _resolve_candidate(self, candidate: dict[str, float]) -> dict[str, float]:
+        resolved = dict(self.environment.calibration_parameters)
+        resolved.update(candidate)
+        return resolved
+
     def _apply_candidate(self, candidate: dict[str, float]) -> None:
         torch = self.torch
         stiffness = torch.tensor(
-            [[self.environment.base_stiffness * candidate["arm_stiffness_scale"]] * 5
-             + [self.environment.base_stiffness * candidate["gripper_stiffness_scale"]]],
+            [
+                [self.environment.base_stiffness * candidate["arm_stiffness_scale"]] * 5
+                + [self.environment.base_stiffness * candidate["gripper_stiffness_scale"]]
+            ],
             dtype=torch.float32,
             device=self.environment.device,
         )
         damping = torch.tensor(
-            [[self.environment.base_damping * candidate["arm_damping_scale"]] * 5
-             + [self.environment.base_damping * candidate["gripper_damping_scale"]]],
+            [
+                [self.environment.base_damping * candidate["arm_damping_scale"]] * 5
+                + [self.environment.base_damping * candidate["gripper_damping_scale"]]
+            ],
             dtype=torch.float32,
             device=self.environment.device,
         )
@@ -142,8 +165,10 @@ class IsaacLabNewtonRuntime:
             device=self.environment.device,
         )
         effort = torch.tensor(
-            [[self.environment.base_effort_limit * candidate["arm_effort_scale"]] * 5
-             + [self.environment.base_effort_limit * candidate["gripper_effort_scale"]]],
+            [
+                [self.environment.base_effort_limit * candidate["arm_effort_scale"]] * 5
+                + [self.environment.base_effort_limit * candidate["gripper_effort_scale"]]
+            ],
             dtype=torch.float32,
             device=self.environment.device,
         )

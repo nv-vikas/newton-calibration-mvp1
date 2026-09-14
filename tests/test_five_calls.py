@@ -85,6 +85,9 @@ def test_five_call_workflow(tmp_path):
     manifest = json.loads(Path(package.manifest_path).read_text())
     assert manifest["optimizer"]["config_fingerprint"] == fit_run.optimizer["config_fingerprint"]
     assert manifest["inputs"]["asset_sha256"] == analysis.asset_fingerprint
+    assert manifest["activation_allowed"] is False  # analytic is contract-only, never production-activatable
+    assert manifest["status"] == "contract-validated-nonactivatable"
+    assert "Activation: **NOT ALLOWED**" in Path(package.report_path).read_text(encoding="utf-8")
     assert "heldout_only" in validation.gates
     with pytest.raises(FileExistsError, match="not empty"):
         tuning.write(validation, output=tmp_path / "package")

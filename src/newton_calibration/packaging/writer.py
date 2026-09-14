@@ -15,6 +15,13 @@ def write_package(validation: ValidationResult, output: str | Path) -> Calibrati
     output_dir.mkdir(parents=True, exist_ok=True)
     plan = validation.fit.plan
     params = validation.fit.best.parameters
+    activation_allowed = validation.passed and plan.environment.adapter == "isaaclab_newton"
+    if activation_allowed:
+        status = "validated"
+    elif validation.passed:
+        status = "contract-validated-nonactivatable"
+    else:
+        status = "rejected"
     source_asset = Path(plan.environment.asset_path).expanduser().resolve()
     if not source_asset.is_file():
         raise FileNotFoundError(f"Cannot package missing source asset: {source_asset}")
@@ -50,7 +57,7 @@ def write_package(validation: ValidationResult, output: str | Path) -> Calibrati
 
     delay_steps = max(0, round(params["command_delay_s"] / plan.environment.dt))
     effective_delay_s = delay_steps * plan.environment.dt
-    overlay = output_dir / ("calibration.usda" if validation.passed else "rejected_candidate.usda")
+    overlay = output_dir / ("calibration.usda" if activation_allowed else "nonactivatable_candidate.usda")
     overlay.write_text(
         "#usda 1.0\n"
         "(\n"
@@ -85,17 +92,21 @@ def write_package(validation: ValidationResult, output: str | Path) -> Calibrati
     )
     validation_path = write_json(output_dir / "validation.json", validation)
     residual_artifact = None
+    residual_sha256 = None
     if plan.environment.residual_model_path:
         residual_source = Path(plan.environment.residual_model_path).expanduser().resolve()
         residual_target = output_dir / "actuator_residual.json"
+        residual_sha256 = sha256_file(residual_source)
         shutil.copy2(residual_source, residual_target)
+        if sha256_file(residual_target) != residual_sha256:
+            raise RuntimeError("Actuator residual changed while the calibration package was being created")
         residual_artifact = residual_target.name
     manifest = {
         "schema": "newton.calibration.package/v1",
         "run_id": validation.run_id,
         "created_at": validation.created_at,
-        "status": "validated" if validation.passed else "rejected",
-        "activation_allowed": validation.passed,
+        "status": status,
+        "activation_allowed": activation_allowed,
         "scope": "SO-101 free-space arm and unloaded gripper actuation",
         "claims": {
             "heldout_passed": validation.passed,
@@ -105,6 +116,7 @@ def write_package(validation: ValidationResult, output: str | Path) -> Calibrati
         "inputs": {
             "asset": plan.environment.asset_path,
             "asset_sha256": current_asset_fingerprint,
+            "residual_sha256": residual_sha256,
             "evidence": plan.evidence_uri,
             "evidence_revision": plan.evidence_revision,
             "evidence_fingerprint": plan.evidence_fingerprint,
@@ -149,16 +161,23 @@ def write_package(validation: ValidationResult, output: str | Path) -> Calibrati
     }
     manifest_path = write_json(output_dir / "manifest.json", manifest)
     report = output_dir / "report.md"
-    claim = (
-        "This package is validated for SO-101 free-space arm motion and unloaded gripper tracking on the recorded "
-        "conditions represented by the held-out Anchor-Lab trajectories."
-        if validation.passed
-        else "This candidate failed held-out validation and must not be activated as a calibrated asset."
-    )
+    if activation_allowed:
+        claim = (
+            "This package is validated for SO-101 free-space arm motion and unloaded gripper tracking on the "
+            "recorded conditions represented by the held-out Anchor-Lab trajectories."
+        )
+    elif validation.passed:
+        claim = (
+            "This analytic-backend run passed contract tests only. It is not a Newton physics validation and must "
+            "not be activated as a calibrated asset."
+        )
+    else:
+        claim = "This candidate failed held-out validation and must not be activated as a calibrated asset."
     report.write_text(
-        f"# SO-101 Newton calibration {'package' if validation.passed else 'candidate'}\n\n"
+        f"# SO-101 Newton calibration {'package' if activation_allowed else 'non-activatable candidate'}\n\n"
         f"- Run: `{validation.run_id}`\n"
         f"- Held-out result: **{'PASS' if validation.passed else 'FAIL'}**\n"
+        f"- Activation: **{'ALLOWED' if activation_allowed else 'NOT ALLOWED'}**\n"
         f"- Weighted-error improvement: **{validation.improvement_pct:.1f}%**\n"
         f"- Runtime: `{plan.environment.adapter}`\n"
         f"- Optimizer: `{validation.fit.optimizer.get('name', plan.optimizer.get('name', 'unknown'))}` "
@@ -173,7 +192,7 @@ def write_package(validation: ValidationResult, output: str | Path) -> Calibrati
         "- Newton runtime: grouped arm/jaw armature and joint friction.\n"
         f"- Toolkit replay: requested command delay {params['command_delay_s'] * 1000.0:.3f} ms; "
         f"applied as {delay_steps} steps = {effective_delay_s * 1000.0:.3f} ms at the locked dt.\n"
-        "- `calibration.usda`: relative source-asset reference plus package provenance; parameter values are in "
+        f"- `{overlay.name}`: relative source-asset provenance layer; parameter values are in "
         "`isaaclab_actuator.yaml` and `manifest.json`.\n\n"
         "## Gates\n\n"
         + "\n".join(f"- {'PASS' if passed else 'FAIL'} — {name}" for name, passed in validation.gates.items())

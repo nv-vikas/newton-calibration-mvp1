@@ -34,6 +34,38 @@ package = tuning.write(validation, output="packages/so101")
 
 The five functions are deterministic product APIs. A future calibration agent can guide or monitor these same calls without becoming a dependency of the core.
 
+## Load a validated package
+
+The package loader verifies activation status, held-out gates, the packaged USD
+hash, parameter bounds and ownership, YAML/manifest consistency, runtime and
+solver settings, and command-delay quantization before returning a configuration.
+It deliberately uses the relocatable USD copied into the package rather than
+the original absolute asset path.
+
+```python
+from newton_calibration.isaaclab import SO101EnvCfg, VerifiedSO101Package
+
+verified = VerifiedSO101Package.open(
+    "packages/so101",
+    # Recommended when the package crosses a trust boundary:
+    expected_manifest_sha256="<digest from the producer>",
+)
+env_cfg = verified.to_env_cfg(device="cuda:0")
+
+# Equivalent convenience form:
+env_cfg = SO101EnvCfg.from_calibration(
+    "packages/so101",
+    device="cuda:0",
+    expected_manifest_sha256="<digest from the producer>",
+)
+```
+
+All 11 values remain attached to `env_cfg.calibration_parameters`; this is a
+serializable toolkit replay configuration, not a Gym environment. The Newton
+replay adapter applies explicit-PD values, Newton armature/friction, and the
+locked physics-step delay. See [`docs/package_loader.md`](docs/package_loader.md)
+for the boundary and current task-environment limitation.
+
 An actuator-level residual is available in MVP1 by setting `residual_model_path` on `SO101EnvCfg`. The current plug-in computes a bounded learned `Δtorque(error, velocity, command change, history)` and adds it to the Newton PD torque. It is off by default, fitted only after physical parameters, and must pass the same held-out validation before the package is activatable.
 
 ## What each boundary owns

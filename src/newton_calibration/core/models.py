@@ -32,6 +32,10 @@ class EnvironmentSpec:
     solver_iterations: int = 100
     solver_tolerance: float = 1e-6
     residual_model_path: str | None = None
+    calibration_run_id: str | None = None
+    calibration_manifest_path: str | None = None
+    calibration_manifest_sha256: str | None = None
+    calibration_parameters: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass

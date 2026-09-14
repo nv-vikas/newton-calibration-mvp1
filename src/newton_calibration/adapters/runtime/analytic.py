@@ -8,18 +8,21 @@ from newton_calibration.actuators import load_residual
 from newton_calibration.core.models import EnvironmentSpec
 from newton_calibration.validation.metrics import compare_trajectories
 
+_SO101_JOINT_ORDER = ("rotation", "pitch", "elbow", "wrist_pitch", "wrist_roll", "jaw")
+
 
 class AnalyticPDReplayRuntime:
     """CPU reference backend for contract tests; it is not the product physics backend."""
 
     def __init__(self, environment: EnvironmentSpec):
         self.environment = environment
-        self.residual = load_residual(environment.residual_model_path, list(environment.joint_map))
+        self.residual = load_residual(environment.residual_model_path, list(_SO101_JOINT_ORDER))
 
     def describe(self) -> EnvironmentSpec:
         return self.environment
 
     def evaluate(self, candidate, episodes: Sequence, objective_weights):
+        candidate = self._resolve_candidate(candidate)
         aggregate: list[dict[str, float]] = []
         per_episode: dict[str, dict[str, float]] = {}
         stable = True
@@ -42,6 +45,11 @@ class AnalyticPDReplayRuntime:
         means = {name: float(np.mean([item[name] for item in aggregate])) for name in names}
         return means["score"], means, per_episode, stable
 
+    def _resolve_candidate(self, candidate: dict[str, float]) -> dict[str, float]:
+        resolved = dict(self.environment.calibration_parameters)
+        resolved.update(candidate)
+        return resolved
+
     def _rollout(self, candidate, episode):
         dt = self.environment.dt
         q = episode.actual_q[0].copy()
@@ -61,9 +69,7 @@ class AnalyticPDReplayRuntime:
             + [self.environment.base_effort_limit * candidate.get("gripper_effort_scale", 1.0)]
         )
         inertia = np.array([1.8, 1.6, 1.2, 0.7, 0.5, 0.35])
-        inertia += np.array(
-            [candidate.get("arm_armature", 0.0)] * 5 + [candidate.get("gripper_armature", 0.0)]
-        )
+        inertia += np.array([candidate.get("arm_armature", 0.0)] * 5 + [candidate.get("gripper_armature", 0.0)])
         if self.residual is not None:
             self.residual.reset(episode.command_q[0])
         for step in range(len(episode.time_s)):
