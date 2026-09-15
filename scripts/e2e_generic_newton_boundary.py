@@ -128,7 +128,7 @@ def main() -> None:
     ]
     runtime = create_runtime(env.describe())
     try:
-        forward = runtime.evaluate(
+        forward_score, forward_metrics, forward_episodes, forward_stable = runtime.evaluate(
             {},
             loaded,
             _OBJECTIVE,
@@ -139,7 +139,7 @@ def main() -> None:
             mapping_fingerprint=evidence_spec.mapping_fingerprint,
         )
         forward_attestation = runtime.attestation()
-        reverse = runtime.evaluate(
+        reverse_score, reverse_metrics, reverse_episodes, reverse_stable = runtime.evaluate(
             {},
             list(reversed(loaded)),
             _OBJECTIVE,
@@ -154,10 +154,10 @@ def main() -> None:
         runtime.close()
 
     deterministic = bool(
-        np.isclose(forward.score, reverse.score, rtol=1e-7, atol=1e-9)
-        and forward.stable
-        and reverse.stable
-        and forward.episodes == reverse.episodes
+        np.isclose(forward_score, reverse_score, rtol=1e-7, atol=1e-9)
+        and forward_stable
+        and reverse_stable
+        and forward_episodes == reverse_episodes
     )
     expected_runtime_joints = list(_USD_JOINTS)
     boundary_passed = bool(
@@ -179,8 +179,22 @@ def main() -> None:
         "source_joints": list(_SOURCE_JOINTS),
         "runtime_joints": expected_runtime_joints,
         "passive_runtime_joints": ["shoulder_lift", "wrist_flex"],
-        "forward": jsonable(forward),
-        "reverse": jsonable(reverse),
+        "forward": jsonable(
+            {
+                "score": forward_score,
+                "metrics": forward_metrics,
+                "episodes": forward_episodes,
+                "stable": forward_stable,
+            }
+        ),
+        "reverse": jsonable(
+            {
+                "score": reverse_score,
+                "metrics": reverse_metrics,
+                "episodes": reverse_episodes,
+                "stable": reverse_stable,
+            }
+        ),
         "deterministic_after_episode_reorder": deterministic,
         "attestation": reverse_attestation,
     }
