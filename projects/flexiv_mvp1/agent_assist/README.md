@@ -5,10 +5,15 @@ nine-motion / 216-second workflow. The current parameter-aware workflow is
 described in [the toolkit guide](../../../docs/parameter_aware_mvp1.md).
 Hardware execution remains unapproved.
 
+[Adaptive search verification](ADAPTIVE_DESIGN_VERIFICATION.md): actual Newton
+sensitivity tests and a 15-motion / 360-second seven-joint collection video.
+The bounded test does not establish complete parameter coverage. One reversal
+has fingertip/table contact candidates; none of these files is hardware-approved.
+
 [Previous parameter-aware regression](PARAMETER_DESIGN_VERIFICATION.md): 224
 tests and a 72-second actual Newton video covering all four collection families
-on joint 1. The full seven-joint campaign is not yet replayed; self-contact
-candidates keep screening in review-required status.
+on joint 1. That regression was not the full seven-joint campaign; its artifacts
+remain preserved separately.
 
 This active adapter leaves `../flexiv_peg_scene/` and its original hashed
 delivery bundle unchanged. It reuses that scene's USD assets. No grasp or

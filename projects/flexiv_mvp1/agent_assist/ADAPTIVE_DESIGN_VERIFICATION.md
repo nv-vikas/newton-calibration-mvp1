@@ -7,6 +7,7 @@ retain informative candidates, export the selected campaign, and request its
 complete labeled viewport video. Source-level tests cover frequency/amplitude/
 posture variants, joint coverage, confounding, budgets, duplicates, failures,
 held-out isolation, CLI behavior, numerical audit and startup-state restoration.
+Final local suite: **246 tests passed**; changed-code Ruff and diff checks passed.
 
 This remains MVP1 free-space actuation. No new grasp, contact or insertion
 implementation; no real robot execution, Flexiv measurements or fitted package.
@@ -62,18 +63,43 @@ the existing threshold; that record is preserved, not rewritten as a pass.
 
 The adapter now consumes four unmeasured warm-up steps and restores the scene
 before any prediction. Unit tests require reset both on success and failure.
-The broader run predates this startup-isolation change; a separate GPU check
-must verify the corrected startup path. The repeatability threshold is unchanged.
+The broader run predates this startup-isolation change; its rejection is retained.
+
+The separate `mvp1-startup-full-command-v3` GPU check completed successfully:
+run `flexiv-agent-assist-mvp1-fcd377c541`, under
+`output/mvp1-startup-full-command/`. It used **full 12-second command files**,
+not a diagnostic window, and five rollouts for one stiffness parameter. There
+were no rejected probes. Baseline-repeat difference was **0.003449 noise units**,
+below the unchanged **0.1** threshold. The saved traces independently reproduce
+the information matrix and selection gain. This narrow test is not a replacement
+for the seven-joint campaign and did not pass the parameter-coverage threshold.
+It also produced a complete 36-second, three-motion native Newton video.
 
 ## Video verification
 
-The full 360-second video is being recorded from live RTX frames, with every
-selected CSV replayed. Initial-frame inspection confirms the active joint,
-motion family, parameter targets, angular excursion and simulated response are
-visible. Final decode, chapter coverage and screening results are pending.
+The complete 360-second video contains 10,800 live RTX frames at 1920×1080,
+30 fps, 1x playback, and all 15 selected command files. The completed Horde
+recording decoded successfully and its chapter/frame checks passed. Initial
+inspection confirms visible joints, families, parameter targets and motion.
+The downloaded copy also passed a complete decode and 15-chapter check. All
+**360 telemetry samples** matched the exact exported command CSVs and the
+recorded Newton screening traces. Peak-excursion frames were visually inspected.
+
+Main video SHA-256:
+`462bbbef957d348a49643b7f109a0f83dfadef71683fa3fa1edd29feafefa5cc`.
+Command-plan SHA-256:
+`2e60618c0d565e3ecd1ebe4950b04d5ac16d5293181b57cb3188fe66d1f751c9`.
+
+All 15 kinematic screens passed; maximum tracking error was 1.126°, maximum
+joint speed 16.956°/s and minimum joint-limit margin 34.877°. Overall screening
+**failed/requires review**, rather than passing, due to the contact flags below.
 
 Video completion is separate from screening approval. Existing self-contact
 candidates remain visible. A simulation screen is not hardware certification.
+The joint-2 slow reversal additionally reports two fingertip/table contact
+candidates. It is **not cleared for real collection**; its pose/amplitude and
+full-path clearance need revision and screening. Sensitivity estimates do not
+override that failure or certify a free-space experiment.
 The old ±2° RDK runner deliberately rejects these larger motions; an operator
 must review coordinates, controller mode, swept volume and limits first.
 

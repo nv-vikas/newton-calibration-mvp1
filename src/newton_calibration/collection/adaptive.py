@@ -117,16 +117,16 @@ def design_campaign(analysis, motion, request, probe, root: Path):
     ledger = root / "design_search.json"
     for index, candidate in enumerate(pool):
         report["remaining_candidates"] = [c.name for c in pool[index:]]
+        current = coverage(total, names, request)
+        weak = {r["parameter"] for r in current if not r["predicted_covered"]}
+        if not weak and names:
+            report["status"] = "predicted_coverage_reached"
+            break
         if probed >= request.max_candidate_probes:
             report["status"] = "probe_budget_reached"
             break
         if len(selected) >= request.max_training_experiments:
             report["status"] = "selection_budget_reached"
-            break
-        current = coverage(total, names, request)
-        weak = {r["parameter"] for r in current if not r["predicted_covered"]}
-        if not weak and names:
-            report["status"] = "predicted_coverage_reached"
             break
         active = [
             r["parameter"]
@@ -213,6 +213,8 @@ def design_campaign(analysis, motion, request, probe, root: Path):
         and not report["measurement_gaps"]
     )
     report["backend_failures_require_review"] = bool(report["failed_candidates"])
+    if names and all(r["predicted_covered"] for r in report["coverage"]):
+        report["status"] = "predicted_coverage_reached"
     if report["exhausted"] and report["failed_candidates"]:
         report.update(status="catalog_visited_with_failures", exhausted=False)
     if not selected and pool:

@@ -103,6 +103,20 @@ def test_probe_budget_preserves_unexplored_work(scene, tmp_path):
     assert any(not row["predicted_covered"] for row in search["coverage"])
 
 
+def test_coverage_met_on_budget_boundary_is_not_reported_incomplete(scene, tmp_path):
+    env, motion = scene
+    names = ("a_stiffness_scale",)
+    result = tuning.assist(
+        env=env,
+        collection=motion,
+        request=CalibrationRequest(target_parameters=names, max_candidate_probes=1),
+        design_probe=MatrixProbe(env, motion, names),
+        workdir=tmp_path / "runs",
+        video=False,
+    )
+    assert result.design["adaptive_search"]["status"] == "predicted_coverage_reached"
+
+
 def test_confounded_parameters_force_search_through_variants(scene, tmp_path):
     env, motion = scene
     motion = replace(motion, posture_offsets_rad=((0.1, 0.0),))
@@ -261,6 +275,27 @@ def test_posture_transition_is_in_exported_commands_and_limits(scene, tmp_path):
     assert episode["excited_usd_joints"] == ["a", "b"]
     assert max(episode["max_velocity_rad_s_by_joint"]) <= 0.3
     assert max(episode["max_acceleration_rad_s2_by_joint"]) <= 0.6
+
+
+def test_video_telemetry_is_checked_against_exact_csv_and_simulation_trace(scene, tmp_path):
+    from newton_calibration.collection.verify_video import verify_command_telemetry
+
+    env, motion = scene
+    result = tuning.assist(env=env, collection=motion, workdir=tmp_path / "runs", video=False)
+    plan_path = Path(result.workdir) / "command_plan.json"
+    record = {"command_plan_sha256": sha256_file(plan_path), "chapters": [], "telemetry": []}
+    screen = {"tests": []}
+    for episode in result.episodes:
+        table = np.loadtxt(Path(result.workdir) / episode["command_file"], delimiter=",", skiprows=1)
+        q = [float(np.interp(12.0, table[:, 0], table[:, j + 1])) for j in range(2)]
+        # Contract-test data only; this does not claim to execute Newton.
+        record["chapters"].append({"name": episode["name"]})
+        record["telemetry"].append({"trial": episode["name"], "time_s": 12.0, "command_q": q, "simulated_q": list(q)})
+        screen["tests"].append({"name": episode["name"], "trace": [{"time_s": 12.0, "simulated_q": list(q)}]})
+    assert verify_command_telemetry(plan_path, record, screen) == len(result.episodes)
+    record["telemetry"][0]["command_q"][0] += 0.1
+    with pytest.raises(ValueError, match="exported motion CSV"):
+        verify_command_telemetry(plan_path, record, screen)
 
 
 def test_duplicate_sensitivity_does_not_resolve_confounding():
