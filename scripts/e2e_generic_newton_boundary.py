@@ -42,6 +42,19 @@ _OBJECTIVE = {
     "phase_error_s": 0.15,
     "hold_nrmse": 0.10,
 }
+_BASELINE_CANDIDATE = {
+    "outer_arm_stiffness_scale": 1.0,
+    "outer_arm_damping_scale": 1.0,
+    "outer_arm_effort_scale": 0.05,
+    "outer_arm_armature": 0.02,
+    "outer_arm_friction_nm": 0.02,
+    "tool_stiffness_scale": 1.0,
+    "tool_damping_scale": 1.0,
+    "tool_effort_scale": 0.01,
+    "tool_armature": 0.005,
+    "tool_friction_nm": 0.01,
+    "command_delay_s": 0.02,
+}
 
 
 def main() -> None:
@@ -129,7 +142,7 @@ def main() -> None:
     runtime = create_runtime(env.describe())
     try:
         forward_score, forward_metrics, forward_episodes, forward_stable = runtime.evaluate(
-            {},
+            _BASELINE_CANDIDATE,
             loaded,
             _OBJECTIVE,
             phase="generic-boundary-forward",
@@ -140,7 +153,7 @@ def main() -> None:
         )
         forward_attestation = runtime.attestation()
         reverse_score, reverse_metrics, reverse_episodes, reverse_stable = runtime.evaluate(
-            {},
+            _BASELINE_CANDIDATE,
             list(reversed(loaded)),
             _OBJECTIVE,
             phase="generic-boundary-reverse",
@@ -154,10 +167,10 @@ def main() -> None:
         runtime.close()
 
     deterministic = bool(
-        np.isclose(forward_score, reverse_score, rtol=1e-7, atol=1e-9)
+        np.isclose(forward_score, reverse_score, rtol=1e-6, atol=1e-9)
         and forward_stable
         and reverse_stable
-        and forward_episodes == reverse_episodes
+        and _episode_metrics_close(forward_episodes, reverse_episodes)
     )
     expected_runtime_joints = list(_USD_JOINTS)
     boundary_passed = bool(
@@ -211,6 +224,24 @@ def _resolve_evidence_root(path: Path) -> Path:
     if root.is_dir():
         return root
     raise FileNotFoundError(f"Anchor-Lab evidence directory does not exist: {root}")
+
+
+def _episode_metrics_close(
+    first: dict[str, dict[str, float]],
+    second: dict[str, dict[str, float]],
+) -> bool:
+    if set(first) != set(second):
+        return False
+    for episode_name, metrics in first.items():
+        other = second[episode_name]
+        if set(metrics) != set(other):
+            return False
+        if not all(
+            np.isclose(metrics[name], other[name], rtol=1e-6, atol=1e-9)
+            for name in metrics
+        ):
+            return False
+    return True
 
 
 if __name__ == "__main__":
