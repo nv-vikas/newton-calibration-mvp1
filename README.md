@@ -1,5 +1,13 @@
 # `newton.calibration` MVP1 — articulated robots
 
+## Reference projects
+
+- [Flexiv MVP 1 — free-motion collection](projects/flexiv_mvp1/): nine motion files,
+  the Isaac Lab / Newton scene and assets, gated RDK recorder, and recorded simulation
+  screening. No real Flexiv data or fitted Flexiv calibration is claimed.
+
+## Toolkit scope
+
 This repository implements the first calibration product slice for a supported
 position-controlled robot articulation. It is **not tied to SO-101**. The
 Anchor-Lab SO-101 data and USD remain the first real-data reference workflow.

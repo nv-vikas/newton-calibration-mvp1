@@ -1,0 +1,8 @@
+numpy==2.0.2
+scipy==1.13.1
+trimesh==4.12.2
+usd-core==26.8
+networkx==3.2.1
+shapely==2.0.7
+rtree==1.4.1
+pillow==11.3.0

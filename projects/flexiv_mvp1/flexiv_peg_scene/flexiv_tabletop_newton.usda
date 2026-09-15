@@ -1,0 +1,703 @@
+#usda 1.0
+(
+    defaultPrim = "World"
+    endTimeCode = 100
+    kilogramsPerUnit = 1
+    metersPerUnit = 1
+    startTimeCode = 0
+    timeCodesPerSecond = 60
+    upAxis = "Z"
+)
+
+def PhysicsScene "physicsScene"
+{
+    vector3f physics:gravityDirection = (0, 0, -1)
+    float physics:gravityMagnitude = 9.81
+}
+
+def "World"
+{
+    def Cube "Ground" (
+        prepend apiSchemas = ["MaterialBindingAPI", "PhysicsCollisionAPI", "PhysxCollisionAPI"]
+    )
+    {
+        rel material:binding = </World/Ground/Material>
+        float physxCollision:contactOffset = 0.00005
+        float physxCollision:restOffset = 0
+        double size = 1
+        float3 xformOp:scale = (10, 10, 0.05)
+        double3 xformOp:translate = (0, 0, -0.025)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+
+        def Material "Material"
+        {
+            token outputs:surface.connect = </World/Ground/Material/Shader.outputs:surface>
+
+            def Shader "Shader"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.17, 0.2, 0.23)
+                float inputs:metallic = 0
+                float inputs:roughness = 0.4
+                token outputs:surface
+            }
+        }
+    }
+
+    def DomeLight "Dome"
+    {
+        color3f inputs:color = (0.86, 0.91, 1)
+        float inputs:colorTemperature = 6500
+        bool inputs:enableColorTemperature = 0
+        float inputs:exposure = 0
+        float inputs:intensity = 1600
+        bool inputs:normalize = 0
+        asset inputs:texture:file
+        token inputs:texture:format = "automatic"
+        bool visibleInPrimaryRay = 1
+        quatd xformOp:orient = (1, 0, 0, 0)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+
+    def RectLight "Key"
+    {
+        float inputs:height = 2
+        float inputs:intensity = 1600
+        float inputs:width = 2
+        double3 xformOp:translate = (0.3, -1, 2.8)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+
+    def RectLight "Fill"
+    {
+        float inputs:height = 1.5
+        float inputs:intensity = 1000
+        float inputs:width = 1.5
+        double3 xformOp:translate = (-0.9, 0.6, 2.4)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+
+    def "Table"
+    {
+        def Cube "Top" (
+            prepend apiSchemas = ["MaterialBindingAPI", "PhysicsCollisionAPI", "PhysxCollisionAPI"]
+        )
+        {
+            rel material:binding = </World/Table/Top/Material>
+            float physxCollision:contactOffset = 0.00005
+            float physxCollision:restOffset = 0
+            double size = 1
+            float3 xformOp:scale = (1.6, 0.9, 0.055)
+            double3 xformOp:translate = (-0.05, 0, 0.7225)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+
+            def Material "Material"
+            {
+                token outputs:surface.connect = </World/Table/Top/Material/Shader.outputs:surface>
+
+                def Shader "Shader"
+                {
+                    uniform token info:id = "UsdPreviewSurface"
+                    color3f inputs:diffuseColor = (0.42, 0.46, 0.49)
+                    float inputs:metallic = 0.3
+                    float inputs:roughness = 0.4
+                    token outputs:surface
+                }
+            }
+        }
+
+        def Cube "Leg_n0_74_n0_34" (
+            prepend apiSchemas = ["MaterialBindingAPI", "PhysicsCollisionAPI", "PhysxCollisionAPI"]
+        )
+        {
+            rel material:binding = </World/Table/Leg_n0_74_n0_34/Material>
+            float physxCollision:contactOffset = 0.00005
+            float physxCollision:restOffset = 0
+            double size = 1
+            float3 xformOp:scale = (0.065, 0.065, 0.7)
+            double3 xformOp:translate = (-0.74, -0.34, 0.35)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+
+            def Material "Material"
+            {
+                token outputs:surface.connect = </World/Table/Leg_n0_74_n0_34/Material/Shader.outputs:surface>
+
+                def Shader "Shader"
+                {
+                    uniform token info:id = "UsdPreviewSurface"
+                    color3f inputs:diffuseColor = (0.09, 0.12, 0.15)
+                    float inputs:metallic = 0.3
+                    float inputs:roughness = 0.4
+                    token outputs:surface
+                }
+            }
+        }
+
+        def Cube "Leg_n0_74_0_34" (
+            prepend apiSchemas = ["MaterialBindingAPI", "PhysicsCollisionAPI", "PhysxCollisionAPI"]
+        )
+        {
+            rel material:binding = </World/Table/Leg_n0_74_0_34/Material>
+            float physxCollision:contactOffset = 0.00005
+            float physxCollision:restOffset = 0
+            double size = 1
+            float3 xformOp:scale = (0.065, 0.065, 0.7)
+            double3 xformOp:translate = (-0.74, 0.34, 0.35)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+
+            def Material "Material"
+            {
+                token outputs:surface.connect = </World/Table/Leg_n0_74_0_34/Material/Shader.outputs:surface>
+
+                def Shader "Shader"
+                {
+                    uniform token info:id = "UsdPreviewSurface"
+                    color3f inputs:diffuseColor = (0.09, 0.12, 0.15)
+                    float inputs:metallic = 0.3
+                    float inputs:roughness = 0.4
+                    token outputs:surface
+                }
+            }
+        }
+
+        def Cube "Leg_0_64_n0_34" (
+            prepend apiSchemas = ["MaterialBindingAPI", "PhysicsCollisionAPI", "PhysxCollisionAPI"]
+        )
+        {
+            rel material:binding = </World/Table/Leg_0_64_n0_34/Material>
+            float physxCollision:contactOffset = 0.00005
+            float physxCollision:restOffset = 0
+            double size = 1
+            float3 xformOp:scale = (0.065, 0.065, 0.7)
+            double3 xformOp:translate = (0.64, -0.34, 0.35)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+
+            def Material "Material"
+            {
+                token outputs:surface.connect = </World/Table/Leg_0_64_n0_34/Material/Shader.outputs:surface>
+
+                def Shader "Shader"
+                {
+                    uniform token info:id = "UsdPreviewSurface"
+                    color3f inputs:diffuseColor = (0.09, 0.12, 0.15)
+                    float inputs:metallic = 0.3
+                    float inputs:roughness = 0.4
+                    token outputs:surface
+                }
+            }
+        }
+
+        def Cube "Leg_0_64_0_34" (
+            prepend apiSchemas = ["MaterialBindingAPI", "PhysicsCollisionAPI", "PhysxCollisionAPI"]
+        )
+        {
+            rel material:binding = </World/Table/Leg_0_64_0_34/Material>
+            float physxCollision:contactOffset = 0.00005
+            float physxCollision:restOffset = 0
+            double size = 1
+            float3 xformOp:scale = (0.065, 0.065, 0.7)
+            double3 xformOp:translate = (0.64, 0.34, 0.35)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+
+            def Material "Material"
+            {
+                token outputs:surface.connect = </World/Table/Leg_0_64_0_34/Material/Shader.outputs:surface>
+
+                def Shader "Shader"
+                {
+                    uniform token info:id = "UsdPreviewSurface"
+                    color3f inputs:diffuseColor = (0.09, 0.12, 0.15)
+                    float inputs:metallic = 0.3
+                    float inputs:roughness = 0.4
+                    token outputs:surface
+                }
+            }
+        }
+
+        def Cube "MountPlate" (
+            prepend apiSchemas = ["MaterialBindingAPI", "PhysicsCollisionAPI", "PhysxCollisionAPI"]
+        )
+        {
+            rel material:binding = </World/Table/MountPlate/Material>
+            float physxCollision:contactOffset = 0.00005
+            float physxCollision:restOffset = 0
+            double size = 1
+            float3 xformOp:scale = (0.23, 0.23, 0.015)
+            double3 xformOp:translate = (-0.45, 0, 0.7575)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+
+            def Material "Material"
+            {
+                token outputs:surface.connect = </World/Table/MountPlate/Material/Shader.outputs:surface>
+
+                def Shader "Shader"
+                {
+                    uniform token info:id = "UsdPreviewSurface"
+                    color3f inputs:diffuseColor = (0.13, 0.15, 0.17)
+                    float inputs:metallic = 0.6
+                    float inputs:roughness = 0.4
+                    token outputs:surface
+                }
+            }
+        }
+
+        def Cylinder "Bolt_nn"
+        {
+            double height = 0.004
+            color3f[] primvars:displayColor = [(0.16, 0.17, 0.18)]
+            double radius = 0.006
+            double3 xformOp:translate = (-0.54, -0.09, 0.767)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def Cylinder "Bolt_np"
+        {
+            double height = 0.004
+            color3f[] primvars:displayColor = [(0.16, 0.17, 0.18)]
+            double radius = 0.006
+            double3 xformOp:translate = (-0.54, 0.09, 0.767)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def Cylinder "Bolt_pn"
+        {
+            double height = 0.004
+            color3f[] primvars:displayColor = [(0.16, 0.17, 0.18)]
+            double radius = 0.006
+            double3 xformOp:translate = (-0.36, -0.09, 0.767)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def Cylinder "Bolt_pp"
+        {
+            double height = 0.004
+            color3f[] primvars:displayColor = [(0.16, 0.17, 0.18)]
+            double radius = 0.006
+            double3 xformOp:translate = (-0.36, 0.09, 0.767)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+    }
+
+    def Xform "HoleBlock" (
+        prepend references = @assets/HoleBlock.usd@
+    )
+    {
+        double3 xformOp:translate = (0.15, 0, 0.75)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+
+        over "Collision" (
+            prepend apiSchemas = ["PhysxCollisionAPI"]
+        )
+        {
+            float physxCollision:contactOffset = 0.00005
+            float physxCollision:restOffset = 0
+        }
+    }
+
+    def Xform "Robot" (
+        prepend references = @assets/Flexiv_Rizon4s_Grav.usd@
+    )
+    {
+        bool physxArticulation:enabledSelfCollisions = 0
+        int physxArticulation:solverPositionIterationCount = 32
+        int physxArticulation:solverVelocityIterationCount = 8
+        quatd xformOp:orient = (1, 0, 0, 0)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (-0.44999998807907104, 0, 0.7649999856948853)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+        over "joints"
+        {
+            over "root_joint"
+            {
+                point3f physics:localPos0 = (-0.45, 0, 0.765)
+            }
+
+            over "joint1" (
+                prepend apiSchemas = ["PhysicsDriveAPI:angular"]
+            )
+            {
+                float drive:angular:physics:targetPosition = 8.468785
+            }
+
+            over "joint2" (
+                prepend apiSchemas = ["PhysicsDriveAPI:angular"]
+            )
+            {
+                float drive:angular:physics:targetPosition = -25.90116
+            }
+
+            over "joint3" (
+                prepend apiSchemas = ["PhysicsDriveAPI:angular"]
+            )
+            {
+                float drive:angular:physics:targetPosition = 2.6209154
+            }
+
+            over "joint4" (
+                prepend apiSchemas = ["PhysicsDriveAPI:angular"]
+            )
+            {
+                float drive:angular:physics:targetPosition = 108.50555
+            }
+
+            over "joint5" (
+                prepend apiSchemas = ["PhysicsDriveAPI:angular"]
+            )
+            {
+                float drive:angular:physics:targetPosition = -1.6012859
+            }
+
+            over "joint6" (
+                prepend apiSchemas = ["PhysicsDriveAPI:angular"]
+            )
+            {
+                float drive:angular:physics:targetPosition = 44.371872
+            }
+
+            over "joint7" (
+                prepend apiSchemas = ["PhysicsDriveAPI:angular"]
+            )
+            {
+                float drive:angular:physics:targetPosition = 11.946685
+            }
+        }
+
+        over "base_link"
+        {
+            over "collisions" (
+                prepend apiSchemas = ["PhysxCollisionAPI"]
+                instanceable = false
+            )
+            {
+                float physxCollision:contactOffset = 0.00005
+                float physxCollision:restOffset = 0
+
+                over "convex_mesh"
+                {
+                    over "mesh" (
+                        prepend apiSchemas = ["PhysicsCollisionAPI", "PhysicsMeshCollisionAPI"]
+                    )
+                    {
+                        uniform token physics:approximation = "convexHull"
+                        bool physics:collisionEnabled = 1
+                    }
+                }
+            }
+
+            over "visuals" (
+                instanceable = false
+            )
+            {
+            }
+        }
+
+        over "link1"
+        {
+            over "collisions" (
+                prepend apiSchemas = ["PhysxCollisionAPI"]
+                instanceable = false
+            )
+            {
+                float physxCollision:contactOffset = 0.00005
+                float physxCollision:restOffset = 0
+
+                over "convex_mesh"
+                {
+                    over "mesh" (
+                        prepend apiSchemas = ["PhysicsCollisionAPI", "PhysicsMeshCollisionAPI"]
+                    )
+                    {
+                        uniform token physics:approximation = "convexHull"
+                        bool physics:collisionEnabled = 1
+                    }
+                }
+            }
+
+            over "visuals" (
+                instanceable = false
+            )
+            {
+            }
+        }
+
+        over "link2"
+        {
+            over "collisions" (
+                prepend apiSchemas = ["PhysxCollisionAPI"]
+                instanceable = false
+            )
+            {
+                float physxCollision:contactOffset = 0.00005
+                float physxCollision:restOffset = 0
+
+                over "convex_mesh"
+                {
+                    over "mesh" (
+                        prepend apiSchemas = ["PhysicsCollisionAPI", "PhysicsMeshCollisionAPI"]
+                    )
+                    {
+                        uniform token physics:approximation = "convexHull"
+                        bool physics:collisionEnabled = 1
+                    }
+                }
+            }
+
+            over "visuals" (
+                instanceable = false
+            )
+            {
+            }
+        }
+
+        over "link3"
+        {
+            over "collisions" (
+                prepend apiSchemas = ["PhysxCollisionAPI"]
+                instanceable = false
+            )
+            {
+                float physxCollision:contactOffset = 0.00005
+                float physxCollision:restOffset = 0
+
+                over "convex_mesh"
+                {
+                    over "mesh" (
+                        prepend apiSchemas = ["PhysicsCollisionAPI", "PhysicsMeshCollisionAPI"]
+                    )
+                    {
+                        uniform token physics:approximation = "convexHull"
+                        bool physics:collisionEnabled = 1
+                    }
+                }
+            }
+
+            over "visuals" (
+                instanceable = false
+            )
+            {
+            }
+        }
+
+        over "link4"
+        {
+            over "collisions" (
+                prepend apiSchemas = ["PhysxCollisionAPI"]
+                instanceable = false
+            )
+            {
+                float physxCollision:contactOffset = 0.00005
+                float physxCollision:restOffset = 0
+
+                over "convex_mesh"
+                {
+                    over "mesh" (
+                        prepend apiSchemas = ["PhysicsCollisionAPI", "PhysicsMeshCollisionAPI"]
+                    )
+                    {
+                        uniform token physics:approximation = "convexHull"
+                        bool physics:collisionEnabled = 1
+                    }
+                }
+            }
+
+            over "visuals" (
+                instanceable = false
+            )
+            {
+            }
+        }
+
+        over "link5"
+        {
+            over "collisions" (
+                prepend apiSchemas = ["PhysxCollisionAPI"]
+                instanceable = false
+            )
+            {
+                float physxCollision:contactOffset = 0.00005
+                float physxCollision:restOffset = 0
+
+                over "convex_mesh"
+                {
+                    over "mesh" (
+                        prepend apiSchemas = ["PhysicsCollisionAPI", "PhysicsMeshCollisionAPI"]
+                    )
+                    {
+                        uniform token physics:approximation = "convexHull"
+                        bool physics:collisionEnabled = 1
+                    }
+                }
+            }
+
+            over "visuals" (
+                instanceable = false
+            )
+            {
+            }
+        }
+
+        over "link6"
+        {
+            over "collisions" (
+                prepend apiSchemas = ["PhysxCollisionAPI"]
+                instanceable = false
+            )
+            {
+                float physxCollision:contactOffset = 0.00005
+                float physxCollision:restOffset = 0
+
+                over "convex_mesh"
+                {
+                    over "mesh" (
+                        prepend apiSchemas = ["PhysicsCollisionAPI", "PhysicsMeshCollisionAPI"]
+                    )
+                    {
+                        uniform token physics:approximation = "convexHull"
+                        bool physics:collisionEnabled = 1
+                    }
+                }
+            }
+
+            over "visuals" (
+                instanceable = false
+            )
+            {
+            }
+        }
+
+        over "link7"
+        {
+            over "collisions" (
+                prepend apiSchemas = ["PhysxCollisionAPI"]
+                instanceable = false
+            )
+            {
+                float physxCollision:contactOffset = 0.00005
+                float physxCollision:restOffset = 0
+
+                over "convex_mesh"
+                {
+                    over "mesh" (
+                        prepend apiSchemas = ["PhysicsCollisionAPI", "PhysicsMeshCollisionAPI"]
+                    )
+                    {
+                        uniform token physics:approximation = "convexHull"
+                        bool physics:collisionEnabled = 1
+                    }
+                }
+            }
+
+            over "visuals" (
+                instanceable = false
+            )
+            {
+            }
+        }
+
+        over "Grav_gripper"
+        {
+            over "left_finger_tip"
+            {
+                over "collisions" (
+                    prepend apiSchemas = ["PhysxCollisionAPI"]
+                )
+                {
+                    float physxCollision:contactOffset = 0.00005
+                    float physxCollision:restOffset = 0
+                }
+            }
+
+            over "right_finger_tip"
+            {
+                over "collisions" (
+                    prepend apiSchemas = ["PhysxCollisionAPI"]
+                )
+                {
+                    float physxCollision:contactOffset = 0.00005
+                    float physxCollision:restOffset = 0
+                }
+            }
+
+            over "gripper_base"
+            {
+                over "collisions" (
+                    prepend apiSchemas = ["PhysxCollisionAPI"]
+                )
+                {
+                    float physxCollision:contactOffset = 0.00005
+                    float physxCollision:restOffset = 0
+                }
+
+                over "left_inner_knuckle_joint" (
+                    prepend apiSchemas = ["PhysicsDriveAPI:angular"]
+                )
+                {
+                    float drive:angular:physics:targetPosition = 2.2781773
+                }
+
+                over "right_inner_knuckle_joint" (
+                    prepend apiSchemas = ["PhysicsDriveAPI:angular"]
+                )
+                {
+                    float drive:angular:physics:targetPosition = 2.2781773
+                }
+
+                over "right_outer_knuckle_joint" (
+                    prepend apiSchemas = ["PhysicsDriveAPI:angular"]
+                )
+                {
+                    float drive:angular:physics:targetPosition = 2.2781773
+                }
+            }
+
+            over "left_outer_knuckle"
+            {
+                over "left_outer_finger_joint" (
+                    prepend apiSchemas = ["PhysicsDriveAPI:angular"]
+                )
+                {
+                    float drive:angular:physics:targetPosition = -2.2781773
+                }
+            }
+
+            over "right_outer_knuckle"
+            {
+                over "right_outer_finger_joint" (
+                    prepend apiSchemas = ["PhysicsDriveAPI:angular"]
+                )
+                {
+                    float drive:angular:physics:targetPosition = -2.2781773
+                }
+            }
+
+            over "finger_joint" (
+                prepend apiSchemas = ["PhysicsDriveAPI:angular"]
+            )
+            {
+                float drive:angular:physics:targetPosition = 2.2781773
+            }
+        }
+    }
+
+    def Xform "Peg" (
+        prepend references = @assets/Peg_25.usd@
+    )
+    {
+        quatd xformOp:orient = (0, 0, 1, 0)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.15000000596046448, 0, 0.925000011920929)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+        over "Collision" (
+            prepend apiSchemas = ["PhysxCollisionAPI"]
+        )
+        {
+            float physxCollision:contactOffset = 0.00005
+            float physxCollision:restOffset = 0
+        }
+    }
+}
+

@@ -1,0 +1,66 @@
+diff --git a/src/newton_calibration/isaaclab/tuning.py b/src/newton_calibration/isaaclab/tuning.py
+index d8d4267..bb19991 100644
+--- a/src/newton_calibration/isaaclab/tuning.py
++++ b/src/newton_calibration/isaaclab/tuning.py
+@@ -48,7 +48,7 @@ from newton_calibration.recipes import get_recipe
+ def analyze(
+     *,
+     env: Any,
+-    evidence: str | Path | AnchorLabSO101Evidence | TabularJointEvidence | BoundEvidenceSpec,
++    evidence: str | Path | AnchorLabSO101Evidence | TabularJointEvidence | BoundEvidenceSpec | None = None,
+     recipe: str | None = None,
+     evidence_revision: str = "local",
+     workdir: str | Path = "runs",
+@@ -57,6 +57,8 @@ def analyze(
+ 
+     The signal/name checks below establish that a parameter is reasonable to
+     include in this recipe.  They are not a numerical identifiability proof.
++    With no evidence, emit an asset/readiness report. This does not authorize
++    fitting: plan() still rejects the missing train/held-out data and mapping.
+     """
+     environment = _lock_residual_fingerprint(_environment_spec(env))
+     adapter = _evidence_adapter(evidence, evidence_revision)
+@@ -100,6 +102,8 @@ def analyze(
+         "requested_parameters_identifiable": {parameter.name for parameter in identifiable} == requested_names,
+     }
+     warnings = list(asset_errors) + asset_warnings + residual_errors
++    if isinstance(adapter, _MissingEvidence):
++        warnings.append("No real evidence supplied: this is asset/evidence-readiness analysis, not measured-data analysis or calibration.")
+     if generic:
+         missing_bounds = sorted(requested_names - declared_names)
+         if missing_bounds:
+@@ -541,7 +545,24 @@ def _residual_errors(environment: EnvironmentSpec, logical_joints: list[str]) ->
+     return []
+ 
+ 
++class _MissingEvidence:
++    """Explicit absence, never a synthetic episode or a fit-capable adapter."""
++
++    uri = "evidence:not-collected"
++    revision = "not-collected"
++
++    def inventory(self) -> dict[str, Any]:
++        return {
++            "fingerprint": hashlib.sha256(b"newton.calibration:no-evidence/v1").hexdigest(),
++            "joints": [], "source_joints": [], "signals": [],
++            "train_episodes": [], "heldout_episodes": [], "sample_rates_hz": {},
++            "required_signals_present": False, "clock_synchronized": False,
++        }
++
++
+ def _evidence_adapter(value: Any, revision: str):
++    if value is None:
++        return _MissingEvidence()
+     if isinstance(value, (AnchorLabSO101Evidence, TabularJointEvidence)):
+         return value
+     if isinstance(value, BoundEvidenceSpec):
+@@ -563,6 +584,9 @@ def _evidence_adapter_from_plan(plan_cfg: CalibrationPlan):
+ 
+ 
+ def _describe_evidence(adapter: Any) -> dict[str, Any]:
++    if isinstance(adapter, _MissingEvidence):
++        return {"adapter": "missing", "root": adapter.uri, "revision": adapter.revision,
++                "real_samples": 0, "fit_allowed": False}
+     if isinstance(adapter, TabularJointEvidence):
+         payload = adapter.spec.to_dict()
+         payload["fingerprint"] = adapter.spec.fingerprint

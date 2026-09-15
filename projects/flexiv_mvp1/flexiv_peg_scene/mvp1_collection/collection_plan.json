@@ -1,0 +1,241 @@
+{
+  "schema": "flexiv.mvp1.collection/v1",
+  "robot": "Flexiv Rizon 4s with Grav",
+  "purpose": "unloaded arm free-motion system identification; gripper held fixed",
+  "asset_sha256": "849f286a75fcb5922bf171dc67964a41ad8cdd8b0c6be7cec01f5ff7aa782f44",
+  "command_rate_hz": 100,
+  "expected_joint_order": [
+    "joint1",
+    "joint2",
+    "joint3",
+    "joint4",
+    "joint5",
+    "joint6",
+    "joint7"
+  ],
+  "center_rad": [
+    0.7478081841846871,
+    -0.4520605335854502,
+    0.045743604868911755,
+    1.8937790919981694,
+    -0.027947713104368797,
+    0.7744353000785701,
+    0.20850898379184787
+  ],
+  "lower_rad": [
+    -2.8797932657906435,
+    -2.356194490192345,
+    -3.0543261909900767,
+    -1.9547687622336491,
+    -3.0543261909900767,
+    -1.4835298641951802,
+    -3.0543261909900767
+  ],
+  "upper_rad": [
+    2.8797932657906435,
+    2.356194490192345,
+    3.0543261909900767,
+    2.775073510670984,
+    3.0543261909900767,
+    4.625122517784973,
+    3.0543261909900767
+  ],
+  "episodes": [
+    {
+      "name": "train_joint1_reversals",
+      "split": "train",
+      "command_file": "commands/train_joint1_reversals.csv",
+      "sha256": "90439f924097cb0905c6d83054d8d9a0e4b6938a8fcf75d2a1a78867f7345668",
+      "duration_s": 16.0,
+      "samples": 1601,
+      "max_abs_velocity_rad_s": 0.05483113556160755,
+      "max_abs_acceleration_rad_s2": 0.08680332919589004,
+      "status": "reference_commands_only; not collected evidence"
+    },
+    {
+      "name": "train_joint2_reversals",
+      "split": "train",
+      "command_file": "commands/train_joint2_reversals.csv",
+      "sha256": "61f5e6c2cce71903234c21a000ce9eac565c867267c41cc334c06a17410393a1",
+      "duration_s": 16.0,
+      "samples": 1601,
+      "max_abs_velocity_rad_s": 0.05483113556160755,
+      "max_abs_acceleration_rad_s2": 0.08680332919589004,
+      "status": "reference_commands_only; not collected evidence"
+    },
+    {
+      "name": "train_joint3_reversals",
+      "split": "train",
+      "command_file": "commands/train_joint3_reversals.csv",
+      "sha256": "f92bd94eb10fe2993f648392042ca61197c489130dcc2cf0c3205f373a6ca654",
+      "duration_s": 16.0,
+      "samples": 1601,
+      "max_abs_velocity_rad_s": 0.05483113556160755,
+      "max_abs_acceleration_rad_s2": 0.08680332919589004,
+      "status": "reference_commands_only; not collected evidence"
+    },
+    {
+      "name": "train_joint4_reversals",
+      "split": "train",
+      "command_file": "commands/train_joint4_reversals.csv",
+      "sha256": "82cd3b950a7bd72647c9044bbc60b65cf65d19e04a33a0cc4f5eac3cfcb20b07",
+      "duration_s": 16.0,
+      "samples": 1601,
+      "max_abs_velocity_rad_s": 0.05483113556160755,
+      "max_abs_acceleration_rad_s2": 0.08680332919589004,
+      "status": "reference_commands_only; not collected evidence"
+    },
+    {
+      "name": "train_joint5_reversals",
+      "split": "train",
+      "command_file": "commands/train_joint5_reversals.csv",
+      "sha256": "a5464698c3f3ecbbfe950c178cb56d1943130eb3d0a87905a43dc7f9f198872d",
+      "duration_s": 16.0,
+      "samples": 1601,
+      "max_abs_velocity_rad_s": 0.05483113556160755,
+      "max_abs_acceleration_rad_s2": 0.08680332919589004,
+      "status": "reference_commands_only; not collected evidence"
+    },
+    {
+      "name": "train_joint6_reversals",
+      "split": "train",
+      "command_file": "commands/train_joint6_reversals.csv",
+      "sha256": "50381f3af3586cedc5b702c437a9846266ff2d540e931cef58409eddb2469e58",
+      "duration_s": 16.0,
+      "samples": 1601,
+      "max_abs_velocity_rad_s": 0.05483113556160755,
+      "max_abs_acceleration_rad_s2": 0.08680332919589004,
+      "status": "reference_commands_only; not collected evidence"
+    },
+    {
+      "name": "train_joint7_reversals",
+      "split": "train",
+      "command_file": "commands/train_joint7_reversals.csv",
+      "sha256": "b205a132f6b667171fc24eb3a508afd4a3de68ad7efb5f64e6f01ee1f1baf67f",
+      "duration_s": 16.0,
+      "samples": 1601,
+      "max_abs_velocity_rad_s": 0.05483113556160755,
+      "max_abs_acceleration_rad_s2": 0.08680332919589004,
+      "status": "reference_commands_only; not collected evidence"
+    },
+    {
+      "name": "heldout_multijoint_1",
+      "split": "heldout",
+      "command_file": "commands/heldout_multijoint_1.csv",
+      "sha256": "6662b01d84337db42563d600f563d048e0f837ddd1cc5d169c1ec8624ace15be",
+      "duration_s": 20.0,
+      "samples": 2001,
+      "max_abs_velocity_rad_s": 0.03398998116519618,
+      "max_abs_acceleration_rad_s2": 0.06633792622222269,
+      "status": "reference_commands_only; not collected evidence"
+    },
+    {
+      "name": "heldout_multijoint_2",
+      "split": "heldout",
+      "command_file": "commands/heldout_multijoint_2.csv",
+      "sha256": "05a336e6509f23476c9cd9734c23041432d40ea1419723ae7d979ca8dd79e2f2",
+      "duration_s": 20.0,
+      "samples": 2001,
+      "max_abs_velocity_rad_s": 0.03595507046796004,
+      "max_abs_acceleration_rad_s2": 0.07608872626410974,
+      "status": "reference_commands_only; not collected evidence"
+    }
+  ],
+  "real_samples": 0,
+  "calibrated": false,
+  "real_motion_authorized": false,
+  "rdk_api_target": "1.9 (four-argument SendJointPosition); incompatible APIs fail closed",
+  "runtime_backend": "isaaclab_newton",
+  "command_mode": "NRT_JOINT_POSITION",
+  "timing_note": "NRT controller smooths targets. Log actual send times and robot timestamps separately. Host receive time is not encoder capture time.",
+  "proposed_mapping": [
+    {
+      "rdk_index": 0,
+      "usd_joint": "joint1",
+      "units": "rad",
+      "sign": 1,
+      "offset_rad": 0.0,
+      "confirmed": false
+    },
+    {
+      "rdk_index": 1,
+      "usd_joint": "joint2",
+      "units": "rad",
+      "sign": 1,
+      "offset_rad": 0.0,
+      "confirmed": false
+    },
+    {
+      "rdk_index": 2,
+      "usd_joint": "joint3",
+      "units": "rad",
+      "sign": 1,
+      "offset_rad": 0.0,
+      "confirmed": false
+    },
+    {
+      "rdk_index": 3,
+      "usd_joint": "joint4",
+      "units": "rad",
+      "sign": 1,
+      "offset_rad": 0.0,
+      "confirmed": false
+    },
+    {
+      "rdk_index": 4,
+      "usd_joint": "joint5",
+      "units": "rad",
+      "sign": 1,
+      "offset_rad": 0.0,
+      "confirmed": false
+    },
+    {
+      "rdk_index": 5,
+      "usd_joint": "joint6",
+      "units": "rad",
+      "sign": 1,
+      "offset_rad": 0.0,
+      "confirmed": false
+    },
+    {
+      "rdk_index": 6,
+      "usd_joint": "joint7",
+      "units": "rad",
+      "sign": 1,
+      "offset_rad": 0.0,
+      "confirmed": false
+    }
+  ],
+  "preconditions": [
+    "Qualified operator, E-stop and guarded clear workspace",
+    "Remove peg; no contact with fixture/table",
+    "Confirm RDK version and exact joint index/sign/zero mapping",
+    "Confirm fixed gripper opening, tool mass/COM/inertia and mounting",
+    "Independently teach and check the collection center; runner never auto-homes",
+    "Review Newton sweep report AND real swept volume, cables and self-collision clearance",
+    "Configure existing hardware safety limits; runner never disables or changes them"
+  ],
+  "fitting_scope": {
+    "propose": [
+      "effective stiffness",
+      "effective damping",
+      "joint friction",
+      "armature if evidence supports it"
+    ],
+    "hold_fixed": [
+      "effort limits (no intentional saturation)",
+      "link mass/inertia absent independent measurement"
+    ],
+    "conditional": [
+      "command delay only with characterized clocks",
+      "residual only after structured held-out error"
+    ],
+    "exclude": [
+      "gripping force",
+      "peg/object friction",
+      "insertion",
+      "real task transfer"
+    ]
+  },
+  "current_toolkit_gap": "Default generic recipe still requires effort-saturation evidence and synchronized clocks. A reviewed parameter-subset recipe/controller adapter is needed before fit; never spoof these declarations."
+}

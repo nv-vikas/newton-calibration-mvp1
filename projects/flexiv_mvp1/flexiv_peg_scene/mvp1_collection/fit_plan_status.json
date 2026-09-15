@@ -1,0 +1,11 @@
+{
+  "call": "tuning.plan",
+  "status": "blocked_expected",
+  "run_id": "flexiv-rizon4s-grav-mvp1-32288a455c",
+  "reason": "Cannot plan calibration; readiness checks failed: ['asset_profile_valid', 'joint_map_complete', 'required_signals_present', 'train_split_present', 'heldout_split_present', 'requested_parameter_bounds_declared', 'requested_parameters_identifiable']",
+  "next_action": "Review collection_plan.json, approve the real setup and collect train/held-out trials",
+  "fit_executed": false,
+  "validation_executed": false,
+  "real_samples": 0,
+  "note": "The data-acquisition plan is separate from a locked fitting plan; no gate was bypassed."
+}

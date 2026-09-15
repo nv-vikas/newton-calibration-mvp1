@@ -1,0 +1,96 @@
+{
+  "adapter": "isaaclab_newton",
+  "asset_path": "/Users/vikass/Documents/ChatGPT/New Physics Tuning 2/flexiv_peg_scene/assets/Flexiv_Rizon4s_Grav.usd",
+  "robot_id": "flexiv-rizon4s-grav-mvp1",
+  "profile_schema": "articulation-profile/v1",
+  "device": "cuda:0",
+  "dt": 0.0010416666666666667,
+  "gravity": [
+    0.0,
+    0.0,
+    -9.81
+  ],
+  "joint_map": {
+    "joint1": "joint1",
+    "joint2": "joint2",
+    "joint3": "joint3",
+    "joint4": "joint4",
+    "joint5": "joint5",
+    "joint6": "joint6",
+    "joint7": "joint7"
+  },
+  "joint_groups": {
+    "arm": [
+      "joint1",
+      "joint2",
+      "joint3",
+      "joint4",
+      "joint5",
+      "joint6",
+      "joint7"
+    ]
+  },
+  "joint_order": [
+    "joint1",
+    "joint2",
+    "joint3",
+    "joint4",
+    "joint5",
+    "joint6",
+    "joint7"
+  ],
+  "profile_confirmed": false,
+  "controller_profile_confirmed": false,
+  "controller_profile_source": "Newton scene initialization priors; not OEM-identified RDK controller",
+  "base_stiffness": 1.0,
+  "base_damping": 0.1,
+  "base_effort_limit": 1.0,
+  "base_armature": 0.0,
+  "base_stiffness_by_joint": {
+    "joint1": 4000.0,
+    "joint2": 4000.0,
+    "joint3": 3000.0,
+    "joint4": 3000.0,
+    "joint5": 500.0,
+    "joint6": 500.0,
+    "joint7": 200.0
+  },
+  "base_damping_by_joint": {
+    "joint1": 80.0,
+    "joint2": 80.0,
+    "joint3": 60.0,
+    "joint4": 40.0,
+    "joint5": 10.0,
+    "joint6": 10.0,
+    "joint7": 5.0
+  },
+  "base_effort_limit_by_joint": {
+    "joint1": 123.0,
+    "joint2": 123.0,
+    "joint3": 123.0,
+    "joint4": 123.0,
+    "joint5": 123.0,
+    "joint6": 123.0,
+    "joint7": 123.0
+  },
+  "base_armature_by_joint": {
+    "joint1": 0.05,
+    "joint2": 0.05,
+    "joint3": 0.05,
+    "joint4": 0.05,
+    "joint5": 0.05,
+    "joint6": 0.05,
+    "joint7": 0.05
+  },
+  "analytic_inertia_by_joint": {},
+  "parameter_bounds": {},
+  "num_substeps": 1,
+  "solver_iterations": 100,
+  "solver_tolerance": 1e-06,
+  "residual_model_path": null,
+  "residual_model_sha256": null,
+  "calibration_run_id": null,
+  "calibration_manifest_path": null,
+  "calibration_manifest_sha256": null,
+  "calibration_parameters": {}
+}

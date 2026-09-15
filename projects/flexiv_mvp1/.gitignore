@@ -1,0 +1,10 @@
+# Keep operator identity, hardware approvals and collected logs local.
+approval.json
+approval.*.json
+!approval.template.json
+real_trials/
+raw.jsonl
+.env
+.env.*
+*.pem
+*.key

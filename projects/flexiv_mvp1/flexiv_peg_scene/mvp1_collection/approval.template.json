@@ -1,0 +1,18 @@
+{
+  "operator_name": "",
+  "robot_serial": "",
+  "plan_sha256": "REQUIRED",
+  "newton_free_motion_report": "free_motion_screen.json",
+  "newton_free_motion_report_sha256": "REQUIRED",
+  "tool_payload_description": "",
+  "qualified_operator": false,
+  "mapping_confirmed": false,
+  "payload_confirmed": false,
+  "peg_removed": false,
+  "gripper_fixed": false,
+  "real_swept_volume_reviewed": false,
+  "safety_limits_configured": false,
+  "estop_available": false,
+  "center_taught_and_verified": false,
+  "confirmed_rdk_to_usd_mapping": []
+}

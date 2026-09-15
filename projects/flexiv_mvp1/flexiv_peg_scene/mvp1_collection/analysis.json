@@ -1,0 +1,148 @@
+{
+  "run_id": "flexiv-rizon4s-grav-mvp1-32288a455c",
+  "created_at": "2026-09-15T07:27:47.034560+00:00",
+  "evidence_uri": "evidence:not-collected",
+  "evidence_revision": "not-collected",
+  "evidence_fingerprint": "753083c621218a3968eb1871ab1d630047289b59d7774e7a8d267eb6c875f6f6",
+  "asset_fingerprint": "849f286a75fcb5922bf171dc67964a41ad8cdd8b0c6be7cec01f5ff7aa782f44",
+  "environment": {
+    "adapter": "isaaclab_newton",
+    "asset_path": "/Users/vikass/Documents/ChatGPT/New Physics Tuning 2/flexiv_peg_scene/assets/Flexiv_Rizon4s_Grav.usd",
+    "robot_id": "flexiv-rizon4s-grav-mvp1",
+    "profile_schema": "articulation-profile/v1",
+    "device": "cuda:0",
+    "dt": 0.0010416666666666667,
+    "gravity": [
+      0.0,
+      0.0,
+      -9.81
+    ],
+    "joint_map": {
+      "joint1": "joint1",
+      "joint2": "joint2",
+      "joint3": "joint3",
+      "joint4": "joint4",
+      "joint5": "joint5",
+      "joint6": "joint6",
+      "joint7": "joint7"
+    },
+    "joint_groups": {
+      "arm": [
+        "joint1",
+        "joint2",
+        "joint3",
+        "joint4",
+        "joint5",
+        "joint6",
+        "joint7"
+      ]
+    },
+    "joint_order": [
+      "joint1",
+      "joint2",
+      "joint3",
+      "joint4",
+      "joint5",
+      "joint6",
+      "joint7"
+    ],
+    "profile_confirmed": false,
+    "controller_profile_confirmed": false,
+    "controller_profile_source": "Newton scene initialization priors; not OEM-identified RDK controller",
+    "base_stiffness": 1.0,
+    "base_damping": 0.1,
+    "base_effort_limit": 1.0,
+    "base_armature": 0.0,
+    "base_stiffness_by_joint": {
+      "joint1": 4000.0,
+      "joint2": 4000.0,
+      "joint3": 3000.0,
+      "joint4": 3000.0,
+      "joint5": 500.0,
+      "joint6": 500.0,
+      "joint7": 200.0
+    },
+    "base_damping_by_joint": {
+      "joint1": 80.0,
+      "joint2": 80.0,
+      "joint3": 60.0,
+      "joint4": 40.0,
+      "joint5": 10.0,
+      "joint6": 10.0,
+      "joint7": 5.0
+    },
+    "base_effort_limit_by_joint": {
+      "joint1": 123.0,
+      "joint2": 123.0,
+      "joint3": 123.0,
+      "joint4": 123.0,
+      "joint5": 123.0,
+      "joint6": 123.0,
+      "joint7": 123.0
+    },
+    "base_armature_by_joint": {
+      "joint1": 0.05,
+      "joint2": 0.05,
+      "joint3": 0.05,
+      "joint4": 0.05,
+      "joint5": 0.05,
+      "joint6": 0.05,
+      "joint7": 0.05
+    },
+    "analytic_inertia_by_joint": {},
+    "parameter_bounds": {},
+    "num_substeps": 1,
+    "solver_iterations": 100,
+    "solver_tolerance": 1e-06,
+    "residual_model_path": null,
+    "residual_model_sha256": null,
+    "calibration_run_id": null,
+    "calibration_manifest_path": null,
+    "calibration_manifest_sha256": null,
+    "calibration_parameters": {}
+  },
+  "train_episodes": [],
+  "heldout_episodes": [],
+  "joints": [],
+  "signals": [],
+  "sample_rates_hz": {},
+  "identifiable_parameters": [],
+  "identifiability": {},
+  "warnings": [
+    "Robot profile and joint mapping have not been explicitly confirmed",
+    "Controller profile baselines have not been explicitly confirmed",
+    "Robot-specific safe bounds are required for arm_effort_scale",
+    "No real evidence supplied: this is asset/evidence-readiness analysis, not measured-data analysis or calibration.",
+    "Robot-specific safe bounds are required for absolute armature/friction parameters: arm_armature, arm_effort_scale, arm_friction_nm",
+    "Evidence does not qualify these parameters for fitting: arm_armature, arm_damping_scale, arm_effort_scale, arm_friction_nm, arm_stiffness_scale, command_delay_s. Delay requires synchronized clocks; dynamic terms require measured motion excitation; friction requires bidirectional reversals; effort scale requires an explicit saturation observation.",
+    "The mapping is a locked coordinate transform, not an optimizer variable; ambiguous names, units, signs, or offsets must be confirmed before planning.",
+    "MVP1 validates free-space position-controlled articulation dynamics only; it does not claim contact, grasp force, or task transfer."
+  ],
+  "readiness": {
+    "asset_exists": true,
+    "asset_profile_valid": false,
+    "residual_model_valid": true,
+    "joint_map_complete": false,
+    "required_signals_present": false,
+    "train_split_present": false,
+    "heldout_split_present": false,
+    "requested_parameter_surface_exposed": true,
+    "requested_parameter_bounds_declared": false,
+    "requested_parameters_identifiable": false
+  },
+  "workdir": "/Users/vikass/Documents/ChatGPT/New Physics Tuning 2/flexiv_peg_scene/output/mvp1-analysis/flexiv-rizon4s-grav-mvp1-32288a455c",
+  "recipe": "articulation.position_pd.free_space.v1",
+  "evidence_spec": {
+    "adapter": "missing",
+    "root": "evidence:not-collected",
+    "revision": "not-collected",
+    "real_samples": 0,
+    "fit_allowed": false
+  },
+  "mapping_report": {
+    "ready": false,
+    "blockers": [
+      "Generic articulation calibration requires a bound evidence manifest"
+    ]
+  }
+}
