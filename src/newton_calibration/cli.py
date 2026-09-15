@@ -28,6 +28,10 @@ def main() -> None:
     assist_parser.add_argument(
         "--preview-factory", help="Trusted local module:factory returning a bound Isaac Lab/Newton preview adapter"
     )
+    assist_parser.add_argument(
+        "--design-probe-factory",
+        help="Trusted local module:factory returning a Newton sensitivity probe bound to the same scene",
+    )
     assist_parser.add_argument("--workdir", default="runs")
     assist_parser.add_argument("--no-preview", action="store_true", help="Explicitly skip the default preview request")
 
@@ -54,17 +58,35 @@ def main() -> None:
             if not separator:
                 parser.error("--preview-factory must be a trusted local module:factory")
             preview = getattr(importlib.import_module(module), name)()
+        design_probe = getattr(preview, "design_probe", None)
+        if args.design_probe_factory:
+            module, separator, name = args.design_probe_factory.partition(":")
+            if not separator:
+                parser.error("--design-probe-factory must be a trusted local module:factory")
+            design_probe = getattr(importlib.import_module(module), name)()
         result = tuning.assist(
             env=EnvironmentSpec(**config["environment"]),
             request=CalibrationRequest(**config.get("request", {})),
             collection=MotionSpec(**config["collection"]) if config.get("collection") else None,
             preview=preview,
+            design_probe=design_probe,
             video=not args.no_preview,
             workdir=args.workdir,
         )
         print(json.dumps(jsonable(result), indent=2))
-        if result.status in {"preview_failed", "preview_pending", "needs_scene_setup", "generation_failed", "evidence_action_required"}:
-            raise SystemExit(2)  # files may exist, but requested preview is not complete
+        if (
+            result.status
+            in {
+                "preview_failed",
+                "preview_pending",
+                "needs_scene_setup",
+                "generation_failed",
+                "evidence_action_required",
+                "design_failed",
+            }
+            or result.design.get("adaptive_search", {}).get("status") == "needs_dynamics_probe"
+        ):
+            raise SystemExit(2)  # files may exist, but requested design/preview is not complete
         return
     env = SO101EnvCfg(
         usd_path=str(Path(args.asset).expanduser().resolve()),

@@ -39,6 +39,7 @@ class MotionSpec:
     duration_s: float = 24.0
     hold_s: float = 2.0
     margin_rad: float = 0.15
+    posture_offsets_rad: tuple[tuple[float, ...], ...] = ()
 
     def __post_init__(self):
         n = len(self.joint_names)
@@ -75,6 +76,17 @@ class MotionSpec:
         for name in ("amplitude_rad", "max_velocity_rad_s", "max_acceleration_rad_s2"):
             if np.any(np.asarray(getattr(self, name)) <= 0):
                 raise ValueError(f"{name} must be positive")
+        poses = []
+        for offset in self.posture_offsets_rad:
+            values = np.asarray(offset, dtype=float)
+            if values.shape != (n,) or not np.isfinite(values).all():
+                raise ValueError("Every posture offset needs one finite value per controlled joint")
+            if np.any(abs(values) >= np.asarray(self.amplitude_rad)):
+                raise ValueError("Posture offsets must leave room inside the declared excursion caps")
+            if np.any(center + values <= lower + self.margin_rad) or np.any(center + values >= upper - self.margin_rad):
+                raise ValueError("Proposed posture is outside the joint-limit margin")
+            poses.append(tuple(float(v) for v in values))
+        object.__setattr__(self, "posture_offsets_rad", tuple(poses))
 
 
 @dataclass
@@ -190,6 +202,7 @@ def create_collection_plan(
     motion: MotionSpec | None = None,
     preview: ScenePreview | None = None,
     video: bool = True,
+    design_probe=None,
 ) -> CollectionPlan:
     root = Path(analysis.workdir)
     if (root / "collection_plan.json").exists():
@@ -231,9 +244,32 @@ def create_collection_plan(
     request = CalibrationRequest(**analysis.collection_request)
     catalog = get_catalog(analysis.evidence_needs["catalog"])
     experiments, deferred = catalog.select(analysis.evidence_needs, request, motion.joint_names)
+    adaptive_report = {
+        "status": "recipe_only_explicit" if request.design_mode == "recipe_only" else "needs_dynamics_probe",
+        "exhausted": False,
+        "reason": "Bind a Newton dynamics probe to test and refine motions; recipe coverage is not sensitivity coverage",
+    }
+    if request.design_mode == "adaptive" and design_probe is not None:
+        from .adaptive import design_campaign
+
+        try:
+            experiments, adaptive_report = design_campaign(analysis, motion, request, design_probe, root)
+            deferred = []  # The adaptive ledger records every remaining candidate and reason.
+        except Exception as exc:  # noqa: BLE001 -- persist probe failure, never fabricate coverage
+            result.status = "design_failed"
+            result.design = {"status": "failed", "error": f"{type(exc).__name__}: {exc}", "exhausted": False}
+            result.preview.update(
+                status="blocked", reason="Dynamics experiment design failed; no fake sensitivity result"
+            )
+            write_json(root / "collection_plan.json", result)
+            return result
     result.design = {
         "catalog": analysis.evidence_needs["catalog"],
-        "generator_environment": {"python": platform.python_version(), "numpy": np.__version__, "machine": platform.machine()},
+        "generator_environment": {
+            "python": platform.python_version(),
+            "numpy": np.__version__,
+            "machine": platform.machine(),
+        },
         "experiments": experiments,
         "deferred_by_budget": deferred,
         "duration_s": len(experiments) * motion.duration_s,
@@ -245,6 +281,7 @@ def create_collection_plan(
             for r in analysis.evidence_needs["parameters"]
             if r["disposition"] not in {"collect", "existing_evidence_eligible"}
         ],
+        "adaptive_search": adaptive_report,
     }
     write_json(root / "experiment_design.json", result.design)
     if not experiments:
@@ -329,15 +366,32 @@ def _generate(spec: MotionSpec, root: Path, experiments: list[ExperimentSpec]) -
         offset = np.zeros((len(t), n))
         frequencies = {}
         excited = [spec.joint_names.index(j) for j in experiment.usd_joints]
-        for j in excited:
+        pose = np.asarray(experiment.posture_offset_rad or (0.0,) * n)
+        if pose.shape != (n,) or (np.any(pose) and tuple(pose) not in spec.posture_offsets_rad):
+            raise ValueError("Experiment posture is not in the scene's declared posture envelope")
+        if np.any(pose):
+            excited = sorted(set(excited) | set(np.flatnonzero(pose)))
+        # Smooth out-and-back posture transition inside the same recorded CSV;
+        # alternate postures never require an unrecorded teleport on hardware.
+        u = np.clip(active / 0.2, 0, 1)
+        w = np.clip((1 - active) / 0.2, 0, 1)
+        smooth = lambda x: 10 * x**3 - 15 * x**4 + 6 * x**5
+        offset += smooth(u)[:, None] * smooth(w)[:, None] * pose
+        for j in [spec.joint_names.index(name) for name in experiment.usd_joints]:
             generated = generate_waveform(
-                experiment.recipe_id, t - spec.hold_s, spec.duration_s - 2 * spec.hold_s, j, experiment.variant
+                experiment.recipe_id,
+                (t - spec.hold_s) * experiment.frequency_scale,
+                (spec.duration_s - 2 * spec.hold_s) * experiment.frequency_scale
+                if experiment.recipe_id != "slow_reversal@1"
+                else spec.duration_s - 2 * spec.hold_s,
+                j,
+                experiment.variant,
             )
-            frequencies[spec.joint_names[j]] = list(generated.frequencies_hz)
+            frequencies[spec.joint_names[j]] = [f * experiment.frequency_scale for f in generated.frequencies_hz]
             # Settling's quintic ramps already have smooth boundaries and true
             # constant-position plateaus. A window would destroy those holds.
             waveform = generated.values if experiment.recipe_id == "settling@1" else window * generated.values
-            offset[:, j] = amplitude[j] * waveform
+            offset[:, j] += max(0.0, amplitude[j] - abs(pose[j])) * experiment.amplitude_scale * waveform
         dq = np.gradient(offset, 1 / rate, axis=0, edge_order=2)
         ddq = np.gradient(dq, 1 / rate, axis=0, edge_order=2)
         # Scale each joint, maintaining spectral content, until all explicit limits hold.
@@ -376,9 +430,13 @@ def _generate(spec: MotionSpec, root: Path, experiments: list[ExperimentSpec]) -
                 "name": name,
                 "split": experiment.split,
                 "recipe_id": experiment.recipe_id,
+                "motion_type": "free-space / " + experiment.recipe_id.split("@")[0].replace("_", " "),
+                "frequency_scale": experiment.frequency_scale,
+                "amplitude_scale": experiment.amplitude_scale,
+                "posture_offset_rad": pose.tolist(),
                 "target_parameters": list(experiment.target_parameters),
                 "required_signals": list(experiment.required_signals),
-                "excited_usd_joints": list(experiment.usd_joints),
+                "excited_usd_joints": [spec.joint_names[j] for j in excited],
                 "reason": experiment.reason,
                 "start_position_rad": list(spec.center_rad),
                 "applied_amplitude_scale_by_joint": scale.tolist(),
@@ -438,12 +496,40 @@ def _write_instructions(root: Path, plan: CollectionPlan):
         "Each CSV's column order is motion_spec.joint_names (USD coordinates), not assumed driver order.",
         "Use experiment_design.json for per-experiment targets, required signals and deferred work.",
     ]
+    search = plan.design.get("adaptive_search", {})
+    rows += [
+        "",
+        "## Adaptive motion search",
+        "",
+        f"Status: {search.get('status', 'not run')}",
+        (
+            f"Candidate probes completed: {search.get('probed_candidates', 0)}. "
+            f"Unvisited candidates: {len(search.get('remaining_candidates', []))}."
+        ),
+        "",
+        "This is predicted conditional sensitivity, not real calibration or hardware approval.",
+    ]
+    if search.get("coverage"):
+        rows += ["", "| Parameter | Predicted sensitivity | Next action |", "|---|---|---|"]
+        for item in search["coverage"]:
+            state = "Useful under stated assumptions" if item["predicted_covered"] else "Weak or confounded"
+            action = (
+                "Collect and reanalyze real evidence"
+                if item["predicted_covered"]
+                else (
+                    "Continue unvisited candidates with a reviewed budget"
+                    if search.get("remaining_candidates")
+                    else "Review parameter anchors, measurement noise, additional evidence or supported motion envelope"
+                )
+            )
+            rows.append(f"| {item['parameter']} | {state} | {action} |")
+    rows += ["", "Check design_search.json for probe failures, missing ranges and non-motion evidence requirements."]
     atomic_write_text(root / "COLLECTION_PLAN.md", "\n".join(rows) + "\n")
     atomic_write_text(
         root / "COLLECT_NEXT.md",
         """# Collection proposal — not calibrated and not hardware-approved
 
-Inspect experiment_design.json and evidence_needs.json first. Every command
+Inspect experiment_design.json, design_search.json (when present), and evidence_needs.json first. Every command
 identifies its target parameters, required signals, recipe version and actual
 excitation. Deferred parameters and budget omissions are not covered. A single
 pose with encoders cannot uniquely separate all physical and controller terms.

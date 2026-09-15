@@ -190,6 +190,7 @@ def assist(
     request: CalibrationRequest | None = None,
     collection: MotionSpec | None = None,
     preview: ScenePreview | None = None,
+    design_probe: Any = None,
     video: bool = True,
     workdir: str | Path = "runs",
 ) -> CalibrationPlan | CollectionPlan:
@@ -203,8 +204,10 @@ def assist(
         collection = env.describe_collection()
     if preview is None and hasattr(env, "preview_collection"):
         preview = env.preview_collection
+    if design_probe is None and hasattr(env, "design_probe"):
+        design_probe = env.design_probe
     analysis = analyze(env=env, evidence=evidence, recipe=recipe, request=request, workdir=workdir)
-    return plan(analysis, collection=collection, preview=preview, video=video)
+    return plan(analysis, collection=collection, preview=preview, design_probe=design_probe, video=video)
 
 
 def plan(
@@ -216,6 +219,7 @@ def plan(
     intent: str = "auto",
     collection: MotionSpec | None = None,
     preview: ScenePreview | None = None,
+    design_probe: Any = None,
     video: bool = True,
 ) -> CalibrationPlan | CollectionPlan:
     """Call 2/5: plan fitting, or generate evidence-collection commands.
@@ -244,7 +248,9 @@ def plan(
         intent == "auto"
         and (analysis.evidence_spec.get("adapter") == "missing" or (collection is not None and evidence_gaps))
     ):
-        return create_collection_plan(analysis, motion=collection, preview=preview, video=video)
+        return create_collection_plan(
+            analysis, motion=collection, preview=preview, design_probe=design_probe, video=video
+        )
     failed = [name for name, ready in analysis.readiness.items() if not ready]
     if failed:
         raise ValueError(f"Cannot plan calibration; readiness checks failed: {failed}")

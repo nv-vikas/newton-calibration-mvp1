@@ -3,8 +3,11 @@
 ## What changed
 
 `analyze` now records **which requested parameters need which evidence**.
-`plan` selects supported free-motion experiments from those gaps. It no longer
-generates an identical generic multisine for every calibration objective.
+`plan` creates free-motion candidates from those gaps. With a bound Newton probe
+it now **tests and refines the collection campaign**: frequency, amplitude and
+permitted posture variants are scored and selected under a finite budget.
+Without a probe it exports seed recipes but reports `needs_dynamics_probe`;
+it does not claim motion search or parameter coverage is complete.
 
 The five calls remain `analyze`, `plan`, `fit`, `validate`, `write`. Collection
 is one possible output of `plan`, not a sixth scientific call. An optional agent
@@ -46,6 +49,7 @@ analysis = tuning.analyze(env=env, evidence=existing_logs_or_none, request=reque
 # amplitude/speed/acceleration proposals, and a source for those assumptions.
 result = tuning.plan(
     analysis, collection=scene_motion_spec, preview=scene_newton_preview,
+    design_probe=scene_dynamics_probe,
 )  # Video is on by default when this produces a collection plan.
 ```
 
@@ -78,6 +82,12 @@ their original duration behavior. Explicit parameter subsets require v3.
 - `experiment_design.json`: selected recipe IDs, target parameters, reasons,
   required signals, held-outs and any budget-deferred experiments.
 - `COLLECTION_PLAN.md`: readable parameter/evidence table.
+- `design_search.json`: considered candidates, information gain, decisions,
+  range/noise assumptions, predicted coverage, remaining work and stopping reason.
+- `design_candidates/commands/`: candidates, including rejected ones. Only the
+  top-level `commands/` directory is the selected collection campaign.
+- `design_probes/` and `*.predictions.npz`: sensitivity matrices and underlying
+  **simulated** q/dq responses with hashes; these are not real evidence.
 - `commands/*.csv`: timestamped position, velocity and acceleration proposals.
 - `command_plan.json`: links exact command hashes to the analyzed USD and analysis.
 - `collection_plan.json`: preview lifecycle and artifact fingerprints.
@@ -85,8 +95,47 @@ their original duration behavior. Explicit parameter subsets require v3.
   is bound. No renderer yields `preview_pending`; it never produces a fake video.
 
 An existing collection run is not overwritten: create a new analysis/revision.
-The default training-experiment budget is 64. Any omitted experiments are listed
-explicitly; exceeding a budget is never reported as complete parameter coverage.
+The default budgets are 96 candidate probes and 64 selected training experiments.
+With five active parameters, a candidate takes 13 Newton rollouts (two anchors,
+five perturbations per anchor, and a repeat). Configure limits explicitly in
+`CalibrationRequest`. Budget exhaustion is never reported as complete coverage.
+Adaptive-search records survive interruption, but automatic mid-search resume
+is not implemented in this slice: a new analysis revision reruns the search.
+Do not confuse a durable audit log with checkpoint/resume of the GPU experiment.
+
+## How adaptive motion design works
+
+1. Start broad across joints with sweeps, reversals, acceleration sweeps and
+   settling. Reserve held-outs first; never use them to score or select motions.
+2. Vary frequency, amplitude and permitted posture offsets. Posture transitions
+   are smooth out-and-back moves **inside the exported CSV**, not hidden resets.
+3. Replay each candidate at two declared range anchors, perturb each relevant
+   parameter and measure Newton q/dq changes. Repeat a baseline to check stability.
+4. Scale sensitivities by assumed measurement noise. Keep correlated effects in
+   the information matrix. Retain useful information gain; reject duplicates and
+   low-gain motions. Record all decisions and failures.
+5. Stop at predicted coverage for probe-supported targets, finite catalog
+   exhaustion, or explicit limits. None of these proves real identifiability.
+6. Replay **all selected command files**, including untouched held-outs, in the
+   Newton scene. Video labels show family, joints, target parameters, command
+   excursion and simulated response at 1× speed.
+
+`predicted_coverage_reached` concerns probe-supported targets only.
+`all_requested_parameters_covered` stays false if any requested parameter lacks
+a probe range or requires other evidence/instrumentation. Failed probes do not
+count as successful exhaustion. No saturation-seeking motion is generated.
+
+`FiniteDifferenceProbe` accepts a prediction backend and sourced `ParameterSpec`
+ranges. These are simulation hypotheses, separate from approved fitting bounds.
+`IsaacLabPredictionBackend` binds the contract to a running Newton articulation
+and restores actuator parameters after each probe. It uses full command files
+by default. Optional `probe_window_s` uses a center diagnostic window, resets at
+its first command and records that limitation—not full-trajectory sensitivity.
+
+Noise, strength, separation and minimum-gain thresholds are explicit design
+assumptions, not measured sensor specifications. Coverage is conditional on other
+joint groups and assumed model form. Two range anchors are not an exhaustive
+nonlinear sweep or a global multi-joint identifiability certificate.
 
 ## Modular boundaries — extensible, MVP1 only
 
@@ -97,6 +146,9 @@ explicitly; exceeding a budget is never reported as complete parameter coverage.
 | `collection/mvp1.py` | Free-motion parameter → evidence → experiment mapping | The only implemented domain catalog |
 | `collection/generators.py` | Versioned normalized trajectory generators | Trusted code registration; no code executed from evidence/recipe files |
 | `collection/planning.py` | Envelope enforcement, CSVs, hashes, durable result | Reuses catalog and generator contracts, independent of robot brand |
+| `collection/adaptive.py` | Candidate variants, sensitivity scoring, durable ledger | Uses installed catalog; no hardware driver |
+| `collection/sensitivity.py` | Finite differences, repeatability, saved simulated traces | Runtime-neutral prediction backend contract |
+| `collection/isaaclab_probe.py` | Apply/read back hypotheses and simulate responses | Adapter for pinned Isaac Lab 3 beta2/Newton scene |
 | `collection/isaaclab_preview.py` | Replay + screening in an already running Newton scene | Scene/application owns asset setup, camera and reviewed envelope |
 | Existing fitting/runtime/package layers | Optimizer candidates, Newton runs, held-out comparison, package | Same five-call pipeline; target selection persists into the package |
 
@@ -109,9 +161,9 @@ just because an extension interface exists.
 
 ## Not claimed
 
-This is recipe-guided experiment design, **not** sensitivity/Fisher-information
-optimization, mathematical identifiability certification, multi-pose dynamics
-identification or automatic instrumentation discovery. A USD does not tell us
+This is bounded sensitivity-guided design, **not** mathematical identifiability
+certification, completed calibration, exhaustive exploration of every possible
+trajectory, or automatic instrumentation discovery. A USD does not tell us
 the real robot's driver mapping, payload, controller configuration, accessible
 signals or safe workspace. Those remain explicit review requirements.
 

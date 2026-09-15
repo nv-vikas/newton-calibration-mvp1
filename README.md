@@ -2,9 +2,9 @@
 
 ## Reference projects
 
-- [Parameter-aware MVP1](docs/parameter_aware_mvp1.md): `analyze → plan` selects
-  motions from target parameters and evidence gaps, with per-joint scope,
-  durable coverage reports and default scene video. Only MVP1 is implemented.
+- [Parameter-aware MVP1](docs/parameter_aware_mvp1.md): `analyze → plan` generates
+  and refines motions with a bound Newton sensitivity probe, per-joint scope,
+  auditable coverage decisions and default scene video. Only MVP1 is implemented.
 - [Agent-assisted collection](docs/agent_assisted_collection.md): missing real
   evidence routes to motion generation and a default Isaac Lab/Newton preview;
   [Flexiv scene launcher](projects/flexiv_mvp1/agent_assist/) included. Hardware

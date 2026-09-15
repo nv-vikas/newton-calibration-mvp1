@@ -8,6 +8,10 @@ parser.add_argument("--output", required=True)
 parser.add_argument("--no-preview", action="store_true", help="Explicitly skip rendering; commands remain simulation proposals")
 parser.add_argument("--target-parameter", action="append", default=[], help="Explicit MVP1 parameter scope; repeat for multiple targets")
 parser.add_argument("--motion-duration", type=float, default=24., help="Seconds per collection episode, 12–120")
+parser.add_argument("--max-candidate-probes", type=int, default=96)
+parser.add_argument("--max-training-experiments", type=int, default=64)
+parser.add_argument("--probe-window", type=float, default=None, help="Optional center diagnostic window in seconds; default tests full command files")
+parser.add_argument("--recipe-only", action="store_true", help="Explicitly skip adaptive Newton sensitivity search")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 args.backend = "newton"
@@ -218,7 +222,9 @@ def main():
 
     from collection_surface import run_assisted_collection
     run_assisted_collection(sim, robot, peg, camera, ASSETS, OUTPUT, backend_record, video=not args.no_preview,
-                           targets=args.target_parameter, duration_s=args.motion_duration)
+                           targets=args.target_parameter, duration_s=args.motion_duration,
+                           max_candidate_probes=args.max_candidate_probes, max_training_experiments=args.max_training_experiments,
+                           probe_window_s=args.probe_window, recipe_only=args.recipe_only)
 
 
 try:

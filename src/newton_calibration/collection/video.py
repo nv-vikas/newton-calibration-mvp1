@@ -107,16 +107,51 @@ class MotionRecorder:
         d = ImageDraw.Draw(canvas)
         white, gray, green, blue = "#f5f8fa", "#b5c4ce", "#a4d65e", "#59b7f1"
         d.text((32, 24), "MVP1 | Agent-assisted evidence collection preview", font=self.title_font, fill=white)
-        family = self.episode.get("recipe_id", self.episode["name"]).split("@")[0].replace("_", " ").upper()
+        recipe = self.episode.get("recipe_id", self.episode["name"]).split("@")[0]
+        family = {
+            "servo_sweep": "CHIRP / SERVO SWEEP",
+            "slow_reversal": "SLOW REVERSAL",
+            "acceleration_sweep": "ACCELERATION SWEEP",
+            "settling": "RAMP + SETTLE",
+            "heldout_multisine": "HELD-OUT MULTISINE",
+        }.get(recipe, recipe.replace("_", " ").upper())
         joints = ", ".join(self.episode.get("excited_usd_joints", []))
         name = f"{family} · {joints}" if len(joints) < 30 else family
         d.text(
             (32, 78),
-            f"{self.index + 1:02d} / {len(self.plan['episodes']):02d}   {name}     {t:05.2f} / {self.episode['duration_s']:.0f} s",
+            f"{self.index + 1:02d}/{len(self.plan['episodes']):02d}   FREE SPACE · {name}    {t:05.2f}/{self.episode['duration_s']:.0f} s",
             font=self.body_font,
             fill=green,
         )
-        d.text((32, 140), "ACTUAL ISAAC LAB / NEWTON VIEWPORT · 1× SPEED", font=self.small_font, fill="#243443")
+        d.text((32, 140), "ACTUAL ISAAC LAB / NEWTON VIEWPORT · 1x SPEED", font=self.small_font, fill="#243443")
+        targets = self.episode.get("target_parameters", [])
+        labels = sorted(
+            {
+                next(
+                    (
+                        label
+                        for suffix, label in (
+                            ("stiffness_scale", "stiffness"),
+                            ("damping_scale", "damping"),
+                            ("armature", "armature"),
+                            ("friction_nm", "friction"),
+                            ("command_delay_s", "delay"),
+                        )
+                        if p.endswith(suffix)
+                    ),
+                    p,
+                )
+                for p in targets
+            }
+        )
+        target_text = "Targets: " + (" · ".join(labels) if targets else "held-out evidence collection")
+        span = np.rad2deg(self.episode.get("range_rad_by_joint", [0.0]))
+        d.text(
+            (32, 873),
+            f"{target_text}   |   Largest commanded excursion: {max(span):.1f}°",
+            font=self.small_font,
+            fill=green,
+        )
         d.text((1344, 143), "Joint displacement from start", font=self.joint_font, fill=white)
         d.text((1344, 179), "Command", font=self.small_font, fill=green)
         d.text((1515, 179), "Newton response", font=self.small_font, fill=blue)

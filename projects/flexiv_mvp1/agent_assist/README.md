@@ -5,7 +5,7 @@ nine-motion / 216-second workflow. The current parameter-aware workflow is
 described in [the toolkit guide](../../../docs/parameter_aware_mvp1.md).
 Hardware execution remains unapproved.
 
-[Current parameter-aware regression](PARAMETER_DESIGN_VERIFICATION.md): 224
+[Previous parameter-aware regression](PARAMETER_DESIGN_VERIFICATION.md): 224
 tests and a 72-second actual Newton video covering all four collection families
 on joint 1. The full seven-joint campaign is not yet replayed; self-contact
 candidates keep screening in review-required status.
@@ -46,7 +46,7 @@ the scene's initial pose with joint 1 offset by +0.6 rad, away from the fixture.
 These are **simulation-only exploration proposals**, not hardware-approved
 coordinates. Motions use a 20° amplitude cap, 0.3 rad/s speed cap and 0.6 rad/s²
 acceleration cap; the generator scales them to stay inside that envelope.
-The current full-scope proposal selects four training families per joint
+The explicit `--recipe-only` full-scope proposal selects four training families per joint
 (servo sweep, settling, acceleration sweep, slow reversal), deduplicates shared
 gain/delay tests and adds two distinct combined held-outs: **30 episodes / 720
 seconds** at the default 24 seconds each. Effort evidence remains a separate
@@ -62,6 +62,22 @@ Use repeated `--target-parameter` flags to choose a smaller parameter scope,
 for example `--target-parameter joint1_friction_nm`. `--motion-duration 12`
 creates shorter episodes for a simulation regression; the default remains 24.
 The full proposal is not equivalent to a reviewed real-robot collection campaign.
+
+### Adaptive search (default)
+
+The running-scene Newton probe tests sensitivity of gain, damping, armature,
+friction and delay. The candidate catalog varies frequency, amplitude and
+declared ±0.12 rad joint-2 posture offsets, all inside the same exported CSVs.
+Those offsets and parameter ranges are simulation hypotheses, not OEM limits
+or operator-approved configurations. Approved fitting bounds remain unset.
+
+The default uses full command files, up to 96 candidate probes and 64 selected
+training motions. Use `--max-candidate-probes` / `--max-training-experiments`
+for explicit budgets. Optional `--probe-window 4` is a cheaper center-window
+diagnostic, labeled as such; videos still replay the complete selected CSVs.
+Budget-limited work, weak sensitivities and external evidence needs remain
+visible in `design_search.json`. The number of selected motions is data-driven,
+not a fixed claim of 30 episodes. `--recipe-only` explicitly skips this search.
 
 Look at `assist_result.json` for the run directory, video and screening status.
 The video overlays commands vs **simulated** response. There is no real Flexiv
