@@ -143,6 +143,7 @@ class AnalysisResult:
     recipe: str = ""
     evidence_spec: dict[str, Any] = field(default_factory=dict)
     mapping_report: dict[str, Any] = field(default_factory=dict)
+    assistance: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

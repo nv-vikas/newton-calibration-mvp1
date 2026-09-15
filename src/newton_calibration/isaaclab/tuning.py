@@ -17,6 +17,8 @@ from newton_calibration.adapters.asset import (
 )
 from newton_calibration.adapters.evidence import AnchorLabSO101Evidence, TabularJointEvidence
 from newton_calibration.adapters.runtime import create_runtime
+from newton_calibration.collection import CollectionPlan, MotionSpec, create_collection_plan, prepare_assistance
+from newton_calibration.collection.planning import ScenePreview
 from newton_calibration.core.attestation import record_fingerprint
 from newton_calibration.core.evidence_spec import BoundEvidenceSpec
 from newton_calibration.core.fit_journal import FitJournal
@@ -48,7 +50,7 @@ from newton_calibration.recipes import get_recipe
 def analyze(
     *,
     env: Any,
-    evidence: str | Path | AnchorLabSO101Evidence | TabularJointEvidence | BoundEvidenceSpec,
+    evidence: str | Path | AnchorLabSO101Evidence | TabularJointEvidence | BoundEvidenceSpec | None = None,
     recipe: str | None = None,
     evidence_revision: str = "local",
     workdir: str | Path = "runs",
@@ -57,6 +59,8 @@ def analyze(
 
     The signal/name checks below establish that a parameter is reasonable to
     include in this recipe.  They are not a numerical identifiability proof.
+    With no evidence, emit an asset/readiness report and agent-assisted next
+    actions. plan() routes to collection, never to an unqualified fitting job.
     """
     environment = _lock_residual_fingerprint(_environment_spec(env))
     adapter = _evidence_adapter(evidence, evidence_revision)
@@ -100,6 +104,8 @@ def analyze(
         "requested_parameters_identifiable": {parameter.name for parameter in identifiable} == requested_names,
     }
     warnings = list(asset_errors) + asset_warnings + residual_errors
+    if isinstance(adapter, _MissingEvidence):
+        warnings.append("No real evidence supplied: this is asset/evidence-readiness analysis, not measured-data analysis or calibration.")
     if generic:
         missing_bounds = sorted(requested_names - declared_names)
         if missing_bounds:
@@ -157,8 +163,28 @@ def analyze(
         evidence_spec=_describe_evidence(adapter),
         mapping_report=mapping_report,
     )
+    result.assistance = prepare_assistance(result)
     write_json(run_dir / "analysis.json", result)
     return result
+
+
+def assist(
+    *, env: Any, evidence: Any = None, recipe: str | None = None,
+    collection: MotionSpec | None = None, preview: ScenePreview | None = None,
+    video: bool = True, workdir: str | Path = "runs",
+) -> CalibrationPlan | CollectionPlan:
+    """Agent-facing analyze → plan convenience; no LLM or hardware execution.
+
+    A scene surface may expose describe_collection() and preview_collection().
+    External agents (including a Minjae integration) use this same deterministic
+    contract; this helper does not pretend to install or run such an agent.
+    """
+    if collection is None and hasattr(env, "describe_collection"):
+        collection = env.describe_collection()
+    if preview is None and hasattr(env, "preview_collection"):
+        preview = env.preview_collection
+    analysis = analyze(env=env, evidence=evidence, recipe=recipe, workdir=workdir)
+    return plan(analysis, collection=collection, preview=preview, video=video)
 
 
 def plan(
@@ -167,8 +193,22 @@ def plan(
     recipe: str | None = None,
     optimizer: str | None = None,
     optimizer_options: dict[str, Any] | None = None,
-) -> CalibrationPlan:
-    """Call 2/5: freeze recipe, bounds, splits, objective, runtime, and gates."""
+    intent: str = "auto",
+    collection: MotionSpec | None = None,
+    preview: ScenePreview | None = None,
+    video: bool = True,
+) -> CalibrationPlan | CollectionPlan:
+    """Call 2/5: plan fitting, or generate evidence-collection commands.
+
+    Missing evidence routes to collection by default. With a scene motion
+    specification, CSVs are generated and the bound scene preview is called
+    automatically (video=True). An unavailable renderer is a durable pending
+    action, not a fabricated video or a fit-ready calibration plan.
+    """
+    if intent not in {"auto", "fit", "collect"}:
+        raise ValueError("intent must be auto, fit or collect")
+    if intent == "collect" or (intent == "auto" and analysis.evidence_spec.get("adapter") == "missing"):
+        return create_collection_plan(analysis, motion=collection, preview=preview, video=video)
     failed = [name for name, ready in analysis.readiness.items() if not ready]
     if failed:
         raise ValueError(f"Cannot plan calibration; readiness checks failed: {failed}")
@@ -222,6 +262,8 @@ def fit(
     resume: bool = True,
 ) -> FitResult:
     """Call 3/5: replay evidence, search parameters, and checkpoint every generation."""
+    if not isinstance(calibration_plan, CalibrationPlan):
+        raise TypeError("fit requires a CalibrationPlan backed by real evidence, not a CollectionPlan; collect and re-analyze first")
     run_dir = Path(calibration_plan.workdir)
     history_path = run_dir / "candidate-history.jsonl"
     evidence = _evidence_adapter_from_plan(calibration_plan)
@@ -541,7 +583,24 @@ def _residual_errors(environment: EnvironmentSpec, logical_joints: list[str]) ->
     return []
 
 
+class _MissingEvidence:
+    """Explicit absence, never a synthetic episode or a fit-capable adapter."""
+
+    uri = "evidence:not-collected"
+    revision = "not-collected"
+
+    def inventory(self) -> dict[str, Any]:
+        return {
+            "fingerprint": hashlib.sha256(b"newton.calibration:no-evidence/v1").hexdigest(),
+            "joints": [], "source_joints": [], "signals": [],
+            "train_episodes": [], "heldout_episodes": [], "sample_rates_hz": {},
+            "required_signals_present": False, "clock_synchronized": False,
+        }
+
+
 def _evidence_adapter(value: Any, revision: str):
+    if value is None:
+        return _MissingEvidence()
     if isinstance(value, (AnchorLabSO101Evidence, TabularJointEvidence)):
         return value
     if isinstance(value, BoundEvidenceSpec):
@@ -563,6 +622,9 @@ def _evidence_adapter_from_plan(plan_cfg: CalibrationPlan):
 
 
 def _describe_evidence(adapter: Any) -> dict[str, Any]:
+    if isinstance(adapter, _MissingEvidence):
+        return {"adapter": "missing", "root": adapter.uri, "revision": adapter.revision,
+                "real_samples": 0, "fit_allowed": False}
     if isinstance(adapter, TabularJointEvidence):
         payload = adapter.spec.to_dict()
         payload["fingerprint"] = adapter.spec.fingerprint

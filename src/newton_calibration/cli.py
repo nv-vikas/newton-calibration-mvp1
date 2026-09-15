@@ -6,7 +6,8 @@ from pathlib import Path
 
 from newton_calibration.adapters.evidence import fetch_anchor_lab_so101
 from newton_calibration.adapters.surface import SO101EnvCfg
-from newton_calibration.core.models import jsonable
+from newton_calibration.collection import MotionSpec
+from newton_calibration.core.models import EnvironmentSpec, jsonable
 from newton_calibration.isaaclab import tuning
 from newton_calibration.optimizers import list_optimizers
 
@@ -18,6 +19,17 @@ def main() -> None:
     fetch_parser.add_argument("--output", default="data/anchor-lab")
     fetch_parser.add_argument("--revision", default="647edd5787cd764cdc041103ad282dc59214d919")
     subparsers.add_parser("optimizers", help="list installed optimizer plug-ins and versions")
+    assist_parser = subparsers.add_parser(
+        "assist", help="asset-only analyze → collection plan, with video enabled by default"
+    )
+    assist_parser.add_argument(
+        "--config", required=True, help="JSON containing environment and collection (MotionSpec) objects"
+    )
+    assist_parser.add_argument(
+        "--preview-factory", help="Trusted local module:factory returning a bound Isaac Lab/Newton preview adapter"
+    )
+    assist_parser.add_argument("--workdir", default="runs")
+    assist_parser.add_argument("--no-preview", action="store_true", help="Explicitly skip the default preview request")
 
     inspect_parser = subparsers.add_parser("inspect", help="execute analyze + plan without starting physics")
     _add_job_arguments(inspect_parser, include_fit=False)
@@ -31,6 +43,27 @@ def main() -> None:
         return
     if args.command == "optimizers":
         print(json.dumps(list_optimizers(), indent=2, sort_keys=True))
+        return
+    if args.command == "assist":
+        import importlib
+
+        config = json.loads(Path(args.config).read_text())
+        preview = None
+        if args.preview_factory:
+            module, separator, name = args.preview_factory.partition(":")
+            if not separator:
+                parser.error("--preview-factory must be a trusted local module:factory")
+            preview = getattr(importlib.import_module(module), name)()
+        result = tuning.assist(
+            env=EnvironmentSpec(**config["environment"]),
+            collection=MotionSpec(**config["collection"]) if config.get("collection") else None,
+            preview=preview,
+            video=not args.no_preview,
+            workdir=args.workdir,
+        )
+        print(json.dumps(jsonable(result), indent=2))
+        if result.status in {"preview_failed", "preview_pending", "needs_scene_setup", "generation_failed"}:
+            raise SystemExit(2)  # files may exist, but requested preview is not complete
         return
     env = SO101EnvCfg(
         usd_path=str(Path(args.asset).expanduser().resolve()),

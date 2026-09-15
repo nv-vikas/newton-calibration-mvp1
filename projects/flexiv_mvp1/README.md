@@ -4,11 +4,17 @@ Separate project for the **Flexiv Rizon 4s + Grav** Isaac Lab / Newton scene and
 the nine motion files prepared for real-arm data collection. This is a reference
 project, not a replacement for the robot-neutral toolkit at the repository root.
 
-**Status:** all nine reference motions passed the recorded Newton simulation
-screen. No real Flexiv measurements have been collected; no Flexiv parameters
-have been fitted and no real-data held-out validation has passed.
+**Current workflow:** [agent-assisted collection](agent_assist/) integrates
+missing-evidence analysis, generated multi-frequency commands and default
+Isaac Lab/Newton video capture. Use this for new collection proposals.
 
-## Start here
+**Archived snapshot below:** nine small reference motions passed the original
+screen with self-collision disabled. That historical result is not a current
+collision clearance or hardware approval. The new preview enables native Newton
+self-collision and reports candidates needing review. No real Flexiv data,
+fitted parameters or real-data held-out validation is claimed by either workflow.
+
+## Original snapshot artifacts
 
 | Deliverable | Location |
 |---|---|
@@ -86,10 +92,10 @@ scene included in this Newton bundle is **`flexiv_tabletop_newton.usda`**.
 The snapshot's no-evidence `analyze` run used toolkit baseline
 `19d9187eaf8014c7b874fdfcf9076cb5c9e9a330` plus the included
 [`toolkit_no_evidence.patch`](flexiv_peg_scene/mvp1_collection/toolkit_no_evidence.patch).
-The patch and its regression tests are supplied as reference artifacts; this
-project upload does **not** merge them into the toolkit core. Inspect and check
-the patch against a separate compatible checkout before reproducing that run.
-The offline collection checks above do not depend on the patch or toolkit install.
+The patch and its tests remain reference artifacts. The current toolkit now
+integrates missing-evidence support and agent-assisted collection; do not reapply
+the archived patch to the current core. The offline snapshot checks above do not
+depend on the patch or toolkit install.
 
 The archived packaging scripts assume the original sibling-directory layout and
 generated `output/` records. They are preserved for provenance, not advertised as

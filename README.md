@@ -2,6 +2,10 @@
 
 ## Reference projects
 
+- [Agent-assisted collection](docs/agent_assisted_collection.md): missing real
+  evidence routes to motion generation and a default Isaac Lab/Newton preview;
+  [Flexiv scene launcher](projects/flexiv_mvp1/agent_assist/) included. Hardware
+  approval and fitting readiness remain separate.
 - [Flexiv MVP 1 — free-motion collection](projects/flexiv_mvp1/): nine motion files,
   the Isaac Lab / Newton scene and assets, gated RDK recorder, and recorded simulation
   screening. No real Flexiv data or fitted Flexiv calibration is claimed.

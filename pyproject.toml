@@ -19,6 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.8"]
+preview = ["Pillow>=10.1", "imageio>=2.34", "imageio-ffmpeg>=0.5"]
 asset-prep = [
   "coacd==1.0.9",
   "trimesh==4.11.1",
