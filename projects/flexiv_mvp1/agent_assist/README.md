@@ -1,5 +1,8 @@
 # Agent-assisted Flexiv collection reference
 
+[Verified end-to-end run and limitations](VERIFICATION.md): nine motions,
+216-second default video, 210 passing tests. Hardware execution remains unapproved.
+
 This active adapter leaves `../flexiv_peg_scene/` and its original hashed
 delivery bundle unchanged. It reuses that scene's USD assets. No grasp or
 insertion implementation is continued here: the peg is parked away, and the
