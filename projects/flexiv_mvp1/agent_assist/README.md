@@ -1,7 +1,14 @@
 # Agent-assisted Flexiv collection reference
 
-[Verified end-to-end run and limitations](VERIFICATION.md): nine motions,
-216-second default video, 210 passing tests. Hardware execution remains unapproved.
+[Historical end-to-end run and limitations](VERIFICATION.md): the earlier fixed
+nine-motion / 216-second workflow. The current parameter-aware workflow is
+described in [the toolkit guide](../../../docs/parameter_aware_mvp1.md).
+Hardware execution remains unapproved.
+
+[Current parameter-aware regression](PARAMETER_DESIGN_VERIFICATION.md): 224
+tests and a 72-second actual Newton video covering all four collection families
+on joint 1. The full seven-joint campaign is not yet replayed; self-contact
+candidates keep screening in review-required status.
 
 This active adapter leaves `../flexiv_peg_scene/` and its original hashed
 delivery bundle unchanged. It reuses that scene's USD assets. No grasp or
@@ -39,13 +46,22 @@ the scene's initial pose with joint 1 offset by +0.6 rad, away from the fixture.
 These are **simulation-only exploration proposals**, not hardware-approved
 coordinates. Motions use a 20° amplitude cap, 0.3 rad/s speed cap and 0.6 rad/s²
 acceleration cap; the generator scales them to stay inside that envelope.
-Seven 24-second single-joint multi-frequency episodes plus two distinct combined
-held-outs produce **216 seconds** of motion, with 2-second endpoint holds.
+The current full-scope proposal selects four training families per joint
+(servo sweep, settling, acceleration sweep, slow reversal), deduplicates shared
+gain/delay tests and adds two distinct combined held-outs: **30 episodes / 720
+seconds** at the default 24 seconds each. Effort evidence remains a separate
+requirement; no saturation-seeking motion is generated. Joint groups are now
+per-axis instead of one shared arm group.
 
 The exact achieved ranges are recorded; the 20° cap is not a claim that every
-joint reaches ±20°. Training frequencies are 0.12 and 0.43 Hz; held-outs use
-different joint-dependent frequencies. These motions are a starting collection
-proposal, not proof of sufficient excitation for all unknown robot dynamics.
+joint reaches ±20°. The selected recipe's spectrum, target parameters, required
+signals and rationale are recorded for every episode. These motions are a
+starting collection proposal, not proof that all dynamics are identifiable.
+
+Use repeated `--target-parameter` flags to choose a smaller parameter scope,
+for example `--target-parameter joint1_friction_nm`. `--motion-duration 12`
+creates shorter episodes for a simulation regression; the default remains 24.
+The full proposal is not equivalent to a reviewed real-robot collection campaign.
 
 Look at `assist_result.json` for the run directory, video and screening status.
 The video overlays commands vs **simulated** response. There is no real Flexiv

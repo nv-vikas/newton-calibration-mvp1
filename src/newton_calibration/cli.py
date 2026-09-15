@@ -6,7 +6,7 @@ from pathlib import Path
 
 from newton_calibration.adapters.evidence import fetch_anchor_lab_so101
 from newton_calibration.adapters.surface import SO101EnvCfg
-from newton_calibration.collection import MotionSpec
+from newton_calibration.collection import CalibrationRequest, MotionSpec
 from newton_calibration.core.models import EnvironmentSpec, jsonable
 from newton_calibration.isaaclab import tuning
 from newton_calibration.optimizers import list_optimizers
@@ -56,13 +56,14 @@ def main() -> None:
             preview = getattr(importlib.import_module(module), name)()
         result = tuning.assist(
             env=EnvironmentSpec(**config["environment"]),
+            request=CalibrationRequest(**config.get("request", {})),
             collection=MotionSpec(**config["collection"]) if config.get("collection") else None,
             preview=preview,
             video=not args.no_preview,
             workdir=args.workdir,
         )
         print(json.dumps(jsonable(result), indent=2))
-        if result.status in {"preview_failed", "preview_pending", "needs_scene_setup", "generation_failed"}:
+        if result.status in {"preview_failed", "preview_pending", "needs_scene_setup", "generation_failed", "evidence_action_required"}:
             raise SystemExit(2)  # files may exist, but requested preview is not complete
         return
     env = SO101EnvCfg(

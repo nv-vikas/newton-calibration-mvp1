@@ -107,11 +107,9 @@ class MotionRecorder:
         d = ImageDraw.Draw(canvas)
         white, gray, green, blue = "#f5f8fa", "#b5c4ce", "#a4d65e", "#59b7f1"
         d.text((32, 24), "MVP1 | Agent-assisted evidence collection preview", font=self.title_font, fill=white)
-        name = (
-            f"JOINT {self.index + 1} · MULTI-FREQUENCY"
-            if self.index < self.nj
-            else f"HELD-OUT {self.index - self.nj + 1} · COMBINED"
-        )
+        family = self.episode.get("recipe_id", self.episode["name"]).split("@")[0].replace("_", " ").upper()
+        joints = ", ".join(self.episode.get("excited_usd_joints", []))
+        name = f"{family} · {joints}" if len(joints) < 30 else family
         d.text(
             (32, 78),
             f"{self.index + 1:02d} / {len(self.plan['episodes']):02d}   {name}     {t:05.2f} / {self.episode['duration_s']:.0f} s",
@@ -190,6 +188,8 @@ class MotionRecorder:
             {
                 "name": self.episode["name"],
                 "split": self.episode["split"],
+                "recipe_id": self.episode.get("recipe_id"),
+                "target_parameters": self.episode.get("target_parameters", []),
                 "start_frame": self.start_frame,
                 "end_frame_exclusive": self.frames,
                 "recorded_screen_passed": result["passed"],

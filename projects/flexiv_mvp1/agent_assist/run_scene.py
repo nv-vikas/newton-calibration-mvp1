@@ -6,6 +6,8 @@ from isaaclab.app import AppLauncher
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--output", required=True)
 parser.add_argument("--no-preview", action="store_true", help="Explicitly skip rendering; commands remain simulation proposals")
+parser.add_argument("--target-parameter", action="append", default=[], help="Explicit MVP1 parameter scope; repeat for multiple targets")
+parser.add_argument("--motion-duration", type=float, default=24., help="Seconds per collection episode, 12–120")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 args.backend = "newton"
@@ -215,7 +217,8 @@ def main():
     peg.reset()
 
     from collection_surface import run_assisted_collection
-    run_assisted_collection(sim, robot, peg, camera, ASSETS, OUTPUT, backend_record, video=not args.no_preview)
+    run_assisted_collection(sim, robot, peg, camera, ASSETS, OUTPUT, backend_record, video=not args.no_preview,
+                           targets=args.target_parameter, duration_s=args.motion_duration)
 
 
 try:
@@ -227,4 +230,3 @@ except BaseException:
     raise
 finally:
     app.close()
-

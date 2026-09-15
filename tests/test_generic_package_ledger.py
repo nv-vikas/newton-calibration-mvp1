@@ -13,6 +13,7 @@ from newton_calibration.adapters.runtime.analytic import (
     _joint_properties,
     _resolve_joint_layout,
 )
+from newton_calibration.collection import CalibrationRequest
 from newton_calibration.core import JointBinding, LongFormSchema, SignalBinding, bind_evidence_files
 from newton_calibration.core.attestation import numeric_surface_fingerprint, parameter_fingerprint
 from newton_calibration.core.io import sha256_file, write_json
@@ -87,7 +88,7 @@ def _write_episode(path: Path, joints: tuple[str, ...], *, phase: float) -> None
     pd.DataFrame(rows).to_csv(path, index=False)
 
 
-def _run_authoritative_contract_fit(tmp_path: Path, monkeypatch):
+def _run_authoritative_contract_fit(tmp_path: Path, monkeypatch, *, targets=()):
     logical_joints = ("joint_0", "joint_1")
     runtime_joints = ("axis_0", "axis_1")
     evidence_root = tmp_path / "evidence"
@@ -168,12 +169,40 @@ def _run_authoritative_contract_fit(tmp_path: Path, monkeypatch):
         env=env,
         evidence=TabularJointEvidence(evidence_spec),
         workdir=tmp_path / "runs",
+        request=CalibrationRequest(target_parameters=targets),
     )
     plan = tuning.plan(analysis)
     fit = tuning.fit(plan, generations=8, population=12, resume=False)
     validation = tuning.validate(fit)
     assert validation.passed, (validation.improvement_pct, validation.regressions, validation.gates)
     return plan, validation
+
+
+def test_scoped_generic_package_round_trip_preserves_unselected_baselines(tmp_path, monkeypatch):
+    # Synthetic attestation fixture, solely for package/loader contract testing.
+    targets = ("first_stiffness_scale", "first_damping_scale", "second_stiffness_scale", "second_damping_scale")
+    _plan, validation = _run_authoritative_contract_fit(tmp_path, monkeypatch, targets=targets)
+    package = tuning.write(validation, output=tmp_path / "scoped-package")
+    verified = VerifiedArticulationPackage.open(package.output_dir)
+    assert set(verified.parameters) == set(targets)
+    restored = verified.to_env_cfg(device="cpu").describe()
+    assert restored.tuning_targets == targets
+    verified.assert_matches_environment(restored)
+    assert verified.actuator.requested_command_delay_s == 0.0
+    import yaml
+
+    patch = yaml.safe_load(Path(package.output_dir, "actuator_patch.yaml").read_text())
+    for joint in patch["ordered_joints"]:
+        assert joint["effort_limit"] == 10.0 and joint["armature"] == 0.0 and joint["friction_nm"] == 0.0
+
+    # Even internally consistent edited YAML cannot silently add a parameter
+    # that was not selected and validated in the recorded recipe.
+    manifest_path = Path(package.manifest_path)
+    manifest = json.loads(manifest_path.read_text())
+    manifest["parameters"]["first_effort_scale"] = 1.0
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(CalibrationPackageLoadError, match="must contain exactly"):
+        VerifiedArticulationPackage.open(package.output_dir)
 
 
 def test_generic_v2_round_trip_and_generation_tamper_rejection(tmp_path: Path, monkeypatch) -> None:
@@ -196,9 +225,7 @@ def test_generic_v2_round_trip_and_generation_tamper_rejection(tmp_path: Path, m
     packaged_generation.write_text(json.dumps(corrupted), encoding="utf-8")
     manifest_path = Path(package.manifest_path)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["artifacts"]["job_record_sha256"]["job/fit-generations/000000.json"] = sha256_file(
-        packaged_generation
-    )
+    manifest["artifacts"]["job_record_sha256"]["job/fit-generations/000000.json"] = sha256_file(packaged_generation)
     manifest_path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
 
     with pytest.raises(CalibrationPackageLoadError, match="optimizer journal.*hash mismatch"):

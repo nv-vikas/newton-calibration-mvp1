@@ -8,6 +8,7 @@ from newton_calibration.core.models import EnvironmentSpec, ParameterSpec
 @dataclass(frozen=True)
 class SO101MVP1Recipe:
     name: str = "so101_actuator_dynamics.v1"
+    collection_catalog: str = "mvp1.free-motion-design@1"
     train_selectors: tuple[str, ...] = (
         "train-step-response",
         "train-chirp-sweep",
@@ -69,9 +70,10 @@ class ArticulationMVP1Recipe:
     name: str
     parameters: tuple[ParameterSpec, ...]
     required_parameter_names: tuple[str, ...]
+    collection_catalog: str = "mvp1.free-motion-design@1"
     train_selectors: tuple[str, ...] = ()
     heldout_selectors: tuple[str, ...] = ()
-    max_episode_duration_s: float = 12.0
+    max_episode_duration_s: float | None = 12.0
     objective_weights: dict[str, float] = field(
         default_factory=lambda: {
             "position_nrmse": 0.60,
@@ -91,10 +93,16 @@ class ArticulationMVP1Recipe:
 def get_recipe(name: str, environment: EnvironmentSpec | None = None) -> SO101MVP1Recipe | ArticulationMVP1Recipe:
     if name == "so101_actuator_dynamics.v1":
         return SO101MVP1Recipe()
-    if name not in {"articulation.position_pd.free_space.v1", "articulation.position_pd.free_space@2"}:
+    if name not in {
+        "articulation.position_pd.free_space.v1",
+        "articulation.position_pd.free_space@2",
+        "articulation.position_pd.free_space@3",
+    }:
         raise KeyError(f"Unknown recipe: {name}")
     if environment is None:
         raise ValueError(f"Recipe {name!r} must be instantiated with a robot environment/profile")
+    if environment.tuning_targets and not name.endswith("@3"):
+        raise ValueError("Explicit parameter selection requires articulation.position_pd.free_space@3")
     if not environment.joint_groups:
         return ArticulationMVP1Recipe(name=name, parameters=(), required_parameter_names=())
 
@@ -112,9 +120,7 @@ def get_recipe(name: str, environment: EnvironmentSpec | None = None) -> SO101MV
     joint_order = list(environment.joint_order) or [
         joint for members in environment.joint_groups.values() for joint in members
     ]
-    group_by_joint = {
-        joint: group for group, members in environment.joint_groups.items() for joint in members
-    }
+    group_by_joint = {joint: group for group, members in environment.joint_groups.items() for joint in members}
     group_order = list(dict.fromkeys(group_by_joint[joint] for joint in joint_order if joint in group_by_joint))
     for group in environment.joint_groups:
         if group not in group_order:
@@ -146,8 +152,17 @@ def get_recipe(name: str, environment: EnvironmentSpec | None = None) -> SO101MV
             "command-to-motion latency",
         )
     )
+    if environment.tuning_targets:
+        unknown = set(environment.tuning_targets) - set(required)
+        if unknown:
+            raise ValueError(f"Unsupported MVP1 target parameters: {sorted(unknown)}")
+        required = [p for p in required if p in environment.tuning_targets]
+        parameters = [p for p in parameters if p.name in environment.tuning_targets]
     return ArticulationMVP1Recipe(
         name=name,
         parameters=tuple(parameters),
         required_parameter_names=tuple(required),
+        # v3 keeps complete trials, including endpoint holds, in fit + validation.
+        # Historical v1/v2 packages retain their original 12-second semantics.
+        max_episode_duration_s=None if name.endswith("@3") else 12.0,
     )

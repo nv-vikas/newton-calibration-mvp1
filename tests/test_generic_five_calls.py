@@ -160,7 +160,7 @@ def test_arbitrary_named_nine_dof_articulation_runs_all_five_calls(tmp_path: Pat
     )
     assert all(analysis.readiness.values()), analysis.warnings
     assert analysis.mapping_report["ready"]
-    assert analysis.recipe == "articulation.position_pd.free_space.v1"
+    assert analysis.recipe == "articulation.position_pd.free_space@3"
 
     plan = tuning.plan(analysis)
     fit = tuning.fit(plan, generations=1, population=4, resume=False)

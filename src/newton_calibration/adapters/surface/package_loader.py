@@ -870,13 +870,13 @@ class VerifiedArticulationPackage:
                 raise CalibrationPackageLoadError("Actuator patch group does not match the robot profile")
             expected_values = (
                 environment.base_stiffness_by_joint.get(logical_joint, environment.base_stiffness)
-                * parameters[f"{group}_stiffness_scale"],
+                * parameters.get(f"{group}_stiffness_scale", 1.0),
                 environment.base_damping_by_joint.get(logical_joint, environment.base_damping)
-                * parameters[f"{group}_damping_scale"],
+                * parameters.get(f"{group}_damping_scale", 1.0),
                 environment.base_effort_limit_by_joint.get(logical_joint, environment.base_effort_limit)
-                * parameters[f"{group}_effort_scale"],
-                parameters[f"{group}_armature"],
-                parameters[f"{group}_friction_nm"],
+                * parameters.get(f"{group}_effort_scale", 1.0),
+                parameters.get(f"{group}_armature", environment.base_armature_by_joint.get(logical_joint, environment.base_armature)),
+                parameters.get(f"{group}_friction_nm", 0.0),
             )
             actual_values = tuple(
                 _nonnegative_number(entry[key], f"actuator patch {logical_joint}.{key}")
@@ -900,7 +900,7 @@ class VerifiedArticulationPackage:
         )
         delay_steps = _nonnegative_integer(timing.get("applied_delay_steps"), "applied delay steps")
         effective_delay = _nonnegative_number(timing.get("effective_command_delay_s"), "effective command delay")
-        _close(requested_delay, parameters["command_delay_s"], "requested command delay")
+        _close(requested_delay, parameters.get("command_delay_s", 0.0), "requested command delay")
         if delay_steps != max(0, round(requested_delay / environment.dt)):
             raise CalibrationPackageLoadError("Applied command-delay steps do not match the locked runtime dt")
         _close(effective_delay, delay_steps * environment.dt, "effective command delay")
@@ -1010,15 +1010,14 @@ class VerifiedArticulationPackage:
         if locked_plan.get("objective_weights") != recipe_cfg.objective_weights:
             raise CalibrationPackageLoadError("Locked objective weights do not match the selected recipe")
         locked_optimizer = _mapping(locked_plan.get("optimizer"), "validation.fit.plan.optimizer")
-        _close(
-            _positive_number(
-                locked_optimizer.get("max_episode_duration_s"),
-                "validation.fit.plan.optimizer.max_episode_duration_s",
-            ),
-            recipe_cfg.max_episode_duration_s,
-            "recipe max episode duration",
-            relative_tolerance=1e-12,
-        )
+        if recipe_cfg.max_episode_duration_s is None:
+            if "max_episode_duration_s" not in locked_optimizer or locked_optimizer["max_episode_duration_s"] is not None:
+                raise CalibrationPackageLoadError("This recipe requires complete episodes, without truncation")
+        else:
+            _close(
+                _positive_number(locked_optimizer.get("max_episode_duration_s"), "validation.fit.plan.optimizer.max_episode_duration_s"),
+                recipe_cfg.max_episode_duration_s, "recipe max episode duration", relative_tolerance=1e-12,
+            )
         fit_optimizer = _mapping(fit.get("optimizer"), "validation.fit.optimizer")
         manifest_optimizer = _mapping(manifest.get("optimizer"), "manifest.optimizer")
         if manifest_optimizer != fit_optimizer:
@@ -1282,6 +1281,7 @@ class VerifiedArticulationPackage:
             base_armature_by_joint=dict(env.base_armature_by_joint),
             analytic_inertia_by_joint=dict(env.analytic_inertia_by_joint),
             parameter_bounds={name: tuple(bounds) for name, bounds in env.parameter_bounds.items()},
+            tuning_targets=tuple(env.tuning_targets),
             num_substeps=env.num_substeps,
             solver_iterations=env.solver_iterations,
             solver_tolerance=env.solver_tolerance,

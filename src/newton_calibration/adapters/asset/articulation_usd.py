@@ -133,7 +133,8 @@ def validate_articulation_asset(environment: EnvironmentSpec) -> UsdInspection:
             blockers.append(f"Controller profile {field_name} must explicitly cover every controlled joint")
     for group in groups:
         effort_bounds = f"{group}_effort_scale"
-        if effort_bounds not in environment.parameter_bounds:
+        selected = not environment.tuning_targets or effort_bounds in environment.tuning_targets
+        if selected and effort_bounds not in environment.parameter_bounds:
             blockers.append(f"Robot-specific safe bounds are required for {effort_bounds}")
     portable, dependency_reason = _root_layer_is_self_contained(Path(environment.asset_path).expanduser().resolve())
     if not portable:

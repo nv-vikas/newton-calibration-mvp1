@@ -60,6 +60,9 @@ class EnvironmentSpec:
     # Required for absolute physical quantities whose safe range cannot be
     # inferred portably from a USD.
     parameter_bounds: dict[str, tuple[float, float, float]] = field(default_factory=dict)
+    # Empty keeps the complete recipe surface. Nonempty scopes a v3 recipe;
+    # the locked environment carries the selection through fitting/packaging.
+    tuning_targets: tuple[str, ...] = ()
     num_substeps: int = 1
     solver_iterations: int = 100
     solver_tolerance: float = 1e-6
@@ -71,6 +74,11 @@ class EnvironmentSpec:
     calibration_parameters: dict[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        if isinstance(self.tuning_targets, str) or len(self.tuning_targets) != len(set(self.tuning_targets)):
+            raise ValueError("tuning_targets must be a unique sequence")
+        if any(not isinstance(name, str) or not name for name in self.tuning_targets):
+            raise ValueError("tuning_targets must contain parameter names")
+        object.__setattr__(self, "tuning_targets", tuple(self.tuning_targets))
         if not self.adapter or not self.asset_path:
             raise ValueError("Environment adapter and asset_path must be non-empty")
         if self.profile_schema not in {"legacy-so101/v1", "articulation-profile/v1"}:
@@ -144,6 +152,8 @@ class AnalysisResult:
     evidence_spec: dict[str, Any] = field(default_factory=dict)
     mapping_report: dict[str, Any] = field(default_factory=dict)
     assistance: dict[str, Any] = field(default_factory=dict)
+    collection_request: dict[str, Any] = field(default_factory=dict)
+    evidence_needs: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

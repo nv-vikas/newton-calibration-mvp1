@@ -18,7 +18,9 @@ from newton_calibration.adapters.asset import (
 from newton_calibration.adapters.evidence import AnchorLabSO101Evidence, TabularJointEvidence
 from newton_calibration.adapters.runtime import create_runtime
 from newton_calibration.collection import CollectionPlan, MotionSpec, create_collection_plan, prepare_assistance
+from newton_calibration.collection.contracts import CalibrationRequest
 from newton_calibration.collection.planning import ScenePreview
+from newton_calibration.collection.registry import get_catalog
 from newton_calibration.core.attestation import record_fingerprint
 from newton_calibration.core.evidence_spec import BoundEvidenceSpec
 from newton_calibration.core.fit_journal import FitJournal
@@ -52,6 +54,7 @@ def analyze(
     env: Any,
     evidence: str | Path | AnchorLabSO101Evidence | TabularJointEvidence | BoundEvidenceSpec | None = None,
     recipe: str | None = None,
+    request: CalibrationRequest | None = None,
     evidence_revision: str = "local",
     workdir: str | Path = "runs",
 ) -> AnalysisResult:
@@ -63,10 +66,15 @@ def analyze(
     actions. plan() routes to collection, never to an unqualified fitting job.
     """
     environment = _lock_residual_fingerprint(_environment_spec(env))
+    request = request or CalibrationRequest()
+    if request.target_parameters:
+        if environment.profile_schema != "articulation-profile/v1":
+            raise ValueError("Parameter-scoped requests require a generic articulation profile")
+        environment = replace(environment, tuning_targets=request.target_parameters)
     adapter = _evidence_adapter(evidence, evidence_revision)
     inventory = adapter.inventory()
     generic = environment.profile_schema == "articulation-profile/v1"
-    recipe_name = recipe or ("articulation.position_pd.free_space.v1" if generic else "so101_actuator_dynamics.v1")
+    recipe_name = recipe or ("articulation.position_pd.free_space@3" if generic else "so101_actuator_dynamics.v1")
     recipe_cfg = get_recipe(recipe_name, environment if generic else None)
     if generic:
         asset_report = validate_articulation_asset(environment)
@@ -105,7 +113,9 @@ def analyze(
     }
     warnings = list(asset_errors) + asset_warnings + residual_errors
     if isinstance(adapter, _MissingEvidence):
-        warnings.append("No real evidence supplied: this is asset/evidence-readiness analysis, not measured-data analysis or calibration.")
+        warnings.append(
+            "No real evidence supplied: this is asset/evidence-readiness analysis, not measured-data analysis or calibration."
+        )
     if generic:
         missing_bounds = sorted(requested_names - declared_names)
         if missing_bounds:
@@ -162,6 +172,10 @@ def analyze(
         recipe=recipe_cfg.name,
         evidence_spec=_describe_evidence(adapter),
         mapping_report=mapping_report,
+        collection_request=jsonable(request),
+        evidence_needs=get_catalog(recipe_cfg.collection_catalog).assess(
+            environment, recipe_cfg.required_parameter_names, inventory, identifiability, request
+        ),
     )
     result.assistance = prepare_assistance(result)
     write_json(run_dir / "analysis.json", result)
@@ -169,9 +183,15 @@ def analyze(
 
 
 def assist(
-    *, env: Any, evidence: Any = None, recipe: str | None = None,
-    collection: MotionSpec | None = None, preview: ScenePreview | None = None,
-    video: bool = True, workdir: str | Path = "runs",
+    *,
+    env: Any,
+    evidence: Any = None,
+    recipe: str | None = None,
+    request: CalibrationRequest | None = None,
+    collection: MotionSpec | None = None,
+    preview: ScenePreview | None = None,
+    video: bool = True,
+    workdir: str | Path = "runs",
 ) -> CalibrationPlan | CollectionPlan:
     """Agent-facing analyze → plan convenience; no LLM or hardware execution.
 
@@ -183,7 +203,7 @@ def assist(
         collection = env.describe_collection()
     if preview is None and hasattr(env, "preview_collection"):
         preview = env.preview_collection
-    analysis = analyze(env=env, evidence=evidence, recipe=recipe, workdir=workdir)
+    analysis = analyze(env=env, evidence=evidence, recipe=recipe, request=request, workdir=workdir)
     return plan(analysis, collection=collection, preview=preview, video=video)
 
 
@@ -207,7 +227,23 @@ def plan(
     """
     if intent not in {"auto", "fit", "collect"}:
         raise ValueError("intent must be auto, fit or collect")
-    if intent == "collect" or (intent == "auto" and analysis.evidence_spec.get("adapter") == "missing"):
+    recorded_analysis = json.loads((Path(analysis.workdir) / "analysis.json").read_text())
+    if recorded_analysis != jsonable(analysis):
+        raise ValueError("Analysis changed after analyze(); create a new analysis revision")
+    if recipe is not None and analysis.recipe and recipe != analysis.recipe:
+        raise ValueError("Rerun analyze() before changing the recipe")
+    evidence_checks = (
+        "joint_map_complete",
+        "required_signals_present",
+        "train_split_present",
+        "heldout_split_present",
+        "requested_parameters_identifiable",
+    )
+    evidence_gaps = any(not analysis.readiness.get(key, False) for key in evidence_checks)
+    if intent == "collect" or (
+        intent == "auto"
+        and (analysis.evidence_spec.get("adapter") == "missing" or (collection is not None and evidence_gaps))
+    ):
         return create_collection_plan(analysis, motion=collection, preview=preview, video=video)
     failed = [name for name, ready in analysis.readiness.items() if not ready]
     if failed:
@@ -263,12 +299,14 @@ def fit(
 ) -> FitResult:
     """Call 3/5: replay evidence, search parameters, and checkpoint every generation."""
     if not isinstance(calibration_plan, CalibrationPlan):
-        raise TypeError("fit requires a CalibrationPlan backed by real evidence, not a CollectionPlan; collect and re-analyze first")
+        raise TypeError(
+            "fit requires a CalibrationPlan backed by real evidence, not a CollectionPlan; collect and re-analyze first"
+        )
     run_dir = Path(calibration_plan.workdir)
     history_path = run_dir / "candidate-history.jsonl"
     evidence = _evidence_adapter_from_plan(calibration_plan)
     _assert_locked_inputs_unchanged(calibration_plan, evidence=evidence)
-    duration = float(calibration_plan.optimizer["max_episode_duration_s"])
+    duration = calibration_plan.optimizer["max_episode_duration_s"]
     episodes = [
         evidence.load_episode(name, dt=calibration_plan.environment.dt, max_duration_s=duration)
         for name in calibration_plan.train_episodes
@@ -470,7 +508,7 @@ def validate(fit_run: FitResult) -> ValidationResult:
         raise ValueError("Fit baseline parameters do not match the locked recipe initials")
     evidence = _evidence_adapter_from_plan(plan_cfg)
     _assert_locked_inputs_unchanged(plan_cfg, evidence=evidence)
-    duration = float(plan_cfg.optimizer["max_episode_duration_s"])
+    duration = plan_cfg.optimizer["max_episode_duration_s"]
     episodes = [
         evidence.load_episode(name, dt=plan_cfg.environment.dt, max_duration_s=duration)
         for name in plan_cfg.heldout_episodes
@@ -592,9 +630,14 @@ class _MissingEvidence:
     def inventory(self) -> dict[str, Any]:
         return {
             "fingerprint": hashlib.sha256(b"newton.calibration:no-evidence/v1").hexdigest(),
-            "joints": [], "source_joints": [], "signals": [],
-            "train_episodes": [], "heldout_episodes": [], "sample_rates_hz": {},
-            "required_signals_present": False, "clock_synchronized": False,
+            "joints": [],
+            "source_joints": [],
+            "signals": [],
+            "train_episodes": [],
+            "heldout_episodes": [],
+            "sample_rates_hz": {},
+            "required_signals_present": False,
+            "clock_synchronized": False,
         }
 
 
@@ -623,8 +666,13 @@ def _evidence_adapter_from_plan(plan_cfg: CalibrationPlan):
 
 def _describe_evidence(adapter: Any) -> dict[str, Any]:
     if isinstance(adapter, _MissingEvidence):
-        return {"adapter": "missing", "root": adapter.uri, "revision": adapter.revision,
-                "real_samples": 0, "fit_allowed": False}
+        return {
+            "adapter": "missing",
+            "root": adapter.uri,
+            "revision": adapter.revision,
+            "real_samples": 0,
+            "fit_allowed": False,
+        }
     if isinstance(adapter, TabularJointEvidence):
         payload = adapter.spec.to_dict()
         payload["fingerprint"] = adapter.spec.fingerprint
@@ -763,9 +811,7 @@ def _identify_parameters(inventory: dict[str, Any], environment: EnvironmentSpec
                     }
                 )
             if complete_signals and covered and group_joints.issubset(reversed_joints):
-                reasons[f"{group}_friction_nm"] = (
-                    f"measured bidirectional reversals cover every {group} coordinate"
-                )
+                reasons[f"{group}_friction_nm"] = f"measured bidirectional reversals cover every {group} coordinate"
             if complete_signals and covered and group_joints.issubset(saturation_joints):
                 reasons[f"{group}_effort_scale"] = (
                     f"independently declared effort saturation covers every {group} coordinate"
@@ -859,9 +905,7 @@ def _mapping_report(environment: EnvironmentSpec, adapter: Any, required_joints:
         blockers.append("Bound evidence mapping does not exactly match the confirmed robot profile")
     if set(binding_map) != required_joints:
         blockers.append("Bound evidence does not cover exactly the controlled logical joints")
-    non_radian_targets = sorted(
-        item.source_joint for item in bindings if item.usd_unit != "rad"
-    )
+    non_radian_targets = sorted(item.source_joint for item in bindings if item.usd_unit != "rad")
     if non_radian_targets:
         blockers.append(
             "The MVP1 Newton revolute-joint runtime requires target units in radians; "

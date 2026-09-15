@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import platform
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -10,6 +11,10 @@ import numpy as np
 
 from newton_calibration.core.io import atomic_write_text, sha256_file, utc_now, write_json
 from newton_calibration.core.models import AnalysisResult
+
+from .contracts import CalibrationRequest, ExperimentSpec
+from .generators import generate_waveform
+from .registry import get_catalog
 
 
 @dataclass(frozen=True)
@@ -80,6 +85,9 @@ class CollectionPlan:
     asset_sha256: str
     motion_spec: MotionSpec | None
     assistance: dict[str, Any]
+    evidence_needs: dict[str, Any] = field(default_factory=dict)
+    design: dict[str, Any] = field(default_factory=dict)
+    analysis_sha256: str = ""
     schema: str = "newton.collection/v1"
     kind: str = "evidence_collection"
     created_at: str = field(default_factory=utc_now)
@@ -118,7 +126,9 @@ def prepare_assistance(analysis: AnalysisResult) -> dict[str, Any]:
                 else "bounded local search around supplied simulation baseline; requires review",
             }
     return {
-        "next_action": "collect_evidence" if missing else "review_fitting_readiness",
+        "next_action": "collect_evidence"
+        if missing or any(r["disposition"] == "collect" for r in analysis.evidence_needs.get("parameters", []))
+        else "review_fitting_readiness",
         "fit_readiness_unchanged": True,
         "joint_mapping": {
             "proposal": dict(env.joint_map),
@@ -156,6 +166,7 @@ def prepare_assistance(analysis: AnalysisResult) -> dict[str, Any]:
                 "effort_scale": "Calibrated signed torque/current and an actual saturation observation; do not deliberately saturate the robot",
                 "model_diagnosis": "Payload, mode, smoothing and optional aligned video",
             },
+            "parameter_requirements": analysis.evidence_needs,
         },
         "operator_checks": [
             "Confirm real-to-USD coordinate mapping",
@@ -181,6 +192,10 @@ def create_collection_plan(
     video: bool = True,
 ) -> CollectionPlan:
     root = Path(analysis.workdir)
+    if (root / "collection_plan.json").exists():
+        raise ValueError(
+            "A collection plan already exists; rerun analyze for a new revision, do not overwrite prior commands"
+        )
     if not analysis.asset_fingerprint or sha256_file(analysis.environment.asset_path) != analysis.asset_fingerprint:
         raise ValueError("Cannot collect against a missing or changed USD; rerun analyze")
     result = CollectionPlan(
@@ -190,7 +205,12 @@ def create_collection_plan(
         analysis.asset_fingerprint,
         motion,
         prepare_assistance(analysis),
+        evidence_needs=analysis.evidence_needs,
+        analysis_sha256=sha256_file(root / "analysis.json"),
     )
+    if not analysis.evidence_needs:
+        raise ValueError("Analysis has no parameter/evidence requirements; rerun analyze with the current toolkit")
+    write_json(root / "evidence_needs.json", analysis.evidence_needs)
     result.preview = {"requested": video, "status": "pending" if video else "skipped_explicitly"}
     write_json(root / "agent_assistance.json", result.assistance)
     if motion is None:
@@ -208,9 +228,37 @@ def create_collection_plan(
     unsupported = [j.name for j in inventory.joints if j.name in expected and j.kind != "revolute"]
     if unsupported:
         raise ValueError(f"Rad-valued collection currently supports revolute joints only: {unsupported}")
+    request = CalibrationRequest(**analysis.collection_request)
+    catalog = get_catalog(analysis.evidence_needs["catalog"])
+    experiments, deferred = catalog.select(analysis.evidence_needs, request, motion.joint_names)
+    result.design = {
+        "catalog": analysis.evidence_needs["catalog"],
+        "generator_environment": {"python": platform.python_version(), "numpy": np.__version__, "machine": platform.machine()},
+        "experiments": experiments,
+        "deferred_by_budget": deferred,
+        "duration_s": len(experiments) * motion.duration_s,
+        "all_requested_parameters_calibrated": False,
+        "numerical_identifiability_proven": False,
+        "requires_real_evidence_reanalysis": True,
+        "non_motion_requirements": [
+            r
+            for r in analysis.evidence_needs["parameters"]
+            if r["disposition"] not in {"collect", "existing_evidence_eligible"}
+        ],
+    }
+    write_json(root / "experiment_design.json", result.design)
+    if not experiments:
+        result.status = "evidence_action_required"
+        result.preview.update(
+            status="not_applicable",
+            reason="No supported new motions: inspect evidence needs for instrumentation, clock, scope or existing-evidence actions",
+        )
+        _write_instructions(root, result)
+        write_json(root / "collection_plan.json", result)
+        return result
     try:
-        result.episodes = _generate(motion, root)
-    except ValueError as exc:
+        result.episodes = _generate(motion, root, experiments)
+    except (ValueError, TypeError) as exc:
         result.status = "generation_failed"
         result.preview.update(status="blocked", reason=f"Motion generation failed: {exc}")
         write_json(root / "collection_plan.json", result)
@@ -255,7 +303,7 @@ def create_collection_plan(
     return result
 
 
-def _generate(spec: MotionSpec, root: Path) -> list[dict[str, Any]]:
+def _generate(spec: MotionSpec, root: Path, experiments: list[ExperimentSpec]) -> list[dict[str, Any]]:
     n = len(spec.joint_names)
     rate = spec.command_rate_hz
     t = np.arange(round(spec.duration_s * rate) + 1) / rate
@@ -276,19 +324,20 @@ def _generate(spec: MotionSpec, root: Path) -> list[dict[str, Any]]:
     window = np.sin(np.pi * active) ** 4  # smooth endpoints, stationary start/end holds
     window[(t <= spec.hold_s) | (t >= spec.duration_s - spec.hold_s)] = 0.0
     episodes = []
-    for index in range(n + 2):
-        train = index < n
-        name = f"train_joint_{index + 1:02d}_multisine" if train else f"heldout_combined_{index - n + 1:02d}"
+    for experiment in experiments:
+        name = experiment.name
         offset = np.zeros((len(t), n))
         frequencies = {}
-        for j in [index] if train else range(n):
-            f0 = 0.12 if train else 0.085 + 0.009 * j + 0.025 * (index - n)
-            f1 = 0.43 if train else 0.31 + 0.013 * j + 0.04 * (index - n)
-            frequencies[spec.joint_names[j]] = [f0, f1]
-            waveform = window * (
-                0.85 * np.sin(2 * np.pi * f0 * (t - spec.hold_s)) + 0.15 * np.sin(2 * np.pi * f1 * (t - spec.hold_s))
+        excited = [spec.joint_names.index(j) for j in experiment.usd_joints]
+        for j in excited:
+            generated = generate_waveform(
+                experiment.recipe_id, t - spec.hold_s, spec.duration_s - 2 * spec.hold_s, j, experiment.variant
             )
-            offset[:, j] = amplitude[j] * (1 if train else 0.65) * waveform
+            frequencies[spec.joint_names[j]] = list(generated.frequencies_hz)
+            # Settling's quintic ramps already have smooth boundaries and true
+            # constant-position plateaus. A window would destroy those holds.
+            waveform = generated.values if experiment.recipe_id == "settling@1" else window * generated.values
+            offset[:, j] = amplitude[j] * waveform
         dq = np.gradient(offset, 1 / rate, axis=0, edge_order=2)
         ddq = np.gradient(dq, 1 / rate, axis=0, edge_order=2)
         # Scale each joint, maintaining spectral content, until all explicit limits hold.
@@ -307,7 +356,6 @@ def _generate(spec: MotionSpec, root: Path) -> list[dict[str, Any]]:
         dq = np.gradient(q, 1 / rate, axis=0, edge_order=2)
         ddq = np.gradient(dq, 1 / rate, axis=0, edge_order=2)
         span = np.ptp(q, axis=0)
-        excited = [index] if train else list(range(n))
         # Do not pretend almost-zero trajectories provide useful excitation.
         if any(span[j] < min(requested[j] * 0.2, 0.01) for j in excited):
             raise ValueError(f"{name}: motion envelope permits too little excitation; review pose/limits")
@@ -326,7 +374,15 @@ def _generate(spec: MotionSpec, root: Path) -> list[dict[str, Any]]:
         episodes.append(
             {
                 "name": name,
-                "split": "train" if train else "heldout",
+                "split": experiment.split,
+                "recipe_id": experiment.recipe_id,
+                "target_parameters": list(experiment.target_parameters),
+                "required_signals": list(experiment.required_signals),
+                "excited_usd_joints": list(experiment.usd_joints),
+                "reason": experiment.reason,
+                "start_position_rad": list(spec.center_rad),
+                "applied_amplitude_scale_by_joint": scale.tolist(),
+                "coverage_claim": "Prospective excitation only; measured eligibility and parameter distinguishability remain unproven",
                 "command_file": str(path.relative_to(root)),
                 "sha256": sha256_file(path),
                 "duration_s": spec.duration_s,
@@ -356,16 +412,44 @@ def verify_commands(plan_path: str | Path) -> dict[str, Any]:
         command = (path.parent / episode["command_file"]).resolve()
         if not command.is_relative_to(path.parent) or sha256_file(command) != episode["sha256"]:
             raise ValueError("Collection command path or fingerprint changed")
+    if plan.get("analysis_sha256") and sha256_file(path.parent / "analysis.json") != plan["analysis_sha256"]:
+        raise ValueError("Collection analysis fingerprint changed")
     return plan
 
 
 def _write_instructions(root: Path, plan: CollectionPlan):
     write_json(root / "evidence_requirements.json", plan.assistance["evidence"])
+    rows = [
+        "# MVP1 evidence collection plan",
+        "",
+        "Simulation proposal only. No real measurements or hardware approval.",
+        "",
+        "| Target | Evidence decision | Proposed experiment | Limitation |",
+        "|---|---|---|---|",
+    ]
+    for need in plan.evidence_needs["parameters"]:
+        rows.append(
+            f"| {need['parameter']} | {need['disposition']} | {', '.join(need['experiment_recipes']) or 'No generated motion'} | {need['limitation']} |"
+        )
+    rows += [
+        "",
+        f"Generated: {len(plan.episodes)} episodes. Budget-deferred experiments: {len(plan.design.get('deferred_by_budget', []))}.",
+        "",
+        "Each CSV's column order is motion_spec.joint_names (USD coordinates), not assumed driver order.",
+        "Use experiment_design.json for per-experiment targets, required signals and deferred work.",
+    ]
+    atomic_write_text(root / "COLLECTION_PLAN.md", "\n".join(rows) + "\n")
     atomic_write_text(
         root / "COLLECT_NEXT.md",
         """# Collection proposal — not calibrated and not hardware-approved
 
-The toolkit generated train and held-out commands in **USD coordinates**. The
+Inspect experiment_design.json and evidence_needs.json first. Every command
+identifies its target parameters, required signals, recipe version and actual
+excitation. Deferred parameters and budget omissions are not covered. A single
+pose with encoders cannot uniquely separate all physical and controller terms.
+
+When supported motions are needed, the toolkit generates train and held-out
+commands in **USD coordinates**. The
 command-plan fingerprint links these exact files to the Newton preview. Review
 the preview's screening report even when the video completes successfully.
 
@@ -383,7 +467,8 @@ Do not deliberately saturate the robot to satisfy an effort-scale recipe.
 
 After collection, bind the real logs to the USD and run analyze again. Only a
 fit-ready analysis may continue through plan → fit → validate → write. Missing
-clock/saturation evidence may require narrowing the fitting recipe; this
+clock/saturation evidence may require an explicit CalibrationRequest with a
+narrower target_parameters selection (never silently remove a target); this
 collection run does not bypass those gates or prove parameter identifiability.
 """,
     )

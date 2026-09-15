@@ -38,14 +38,14 @@ def test_auto_no_evidence_generates_reproducible_motion_and_pending_video(setup,
     env, spec = setup
     result = tuning.assist(env=env, collection=spec, workdir=tmp_path / "runs")
     assert result.status == "preview_pending"
-    assert len(result.episodes) == 4
+    assert len(result.episodes) == 10  # Four evidence-specific experiments per joint + two holdouts.
     assert result.preview["requested"] is True
     assert result.preview["status"] == "blocked"
     assert not result.real_data and not result.real_execution_approved and not result.fit_allowed
     assert not env.profile_confirmed and not env.controller_profile_confirmed and not env.parameter_bounds
     other = tuning.assist(env=env, collection=spec, workdir=tmp_path / "runs")
     assert [e["sha256"] for e in result.episodes] == [e["sha256"] for e in other.episodes]
-    assert [e["split"] for e in result.episodes] == ["train", "train", "heldout", "heldout"]
+    assert [e["split"] for e in result.episodes] == ["train"] * 8 + ["heldout"] * 2
     for episode in result.episodes:
         table = np.genfromtxt(Path(result.workdir) / episode["command_file"], delimiter=",", names=True)
         q = np.column_stack([table["q1_rad"], table["q2_rad"]])
@@ -57,7 +57,9 @@ def test_auto_no_evidence_generates_reproducible_motion_and_pending_video(setup,
         ddq = np.gradient(dq, 1 / spec.command_rate_hz, axis=0, edge_order=2)
         assert np.all(abs(dq).max(axis=0) <= spec.max_velocity_rad_s)
         assert np.all(abs(ddq).max(axis=0) <= spec.max_acceleration_rad_s2)
-        assert np.ptp(q, axis=0).max() > 0.1
+        # Acceleration-rich trajectories can have smaller amplitude under the
+        # same acceleration cap; test the declared excitation threshold.
+        assert np.ptp(q, axis=0).max() > 0.01
     with pytest.raises(TypeError, match="CollectionPlan"):
         tuning.fit(result)
 
@@ -100,7 +102,7 @@ def test_no_preview_only_explicitly_and_errors_are_durable(setup, tmp_path):
     failed = tuning.assist(env=env, collection=spec, preview=fail, workdir=tmp_path)
     assert failed.status == "preview_failed"
     assert "renderer unavailable" in failed.preview["error"]
-    assert len(failed.episodes) == 4
+    assert len(failed.episodes) == 10
     assert json.loads((Path(failed.workdir) / "collection_plan.json").read_text())["status"] == "preview_failed"
 
 
@@ -195,7 +197,7 @@ def test_cli_reports_pending_preview_as_incomplete(setup, tmp_path, monkeypatch,
         main()
     assert error.value.code == 2
     result = json.loads(capsys.readouterr().out)
-    assert result["status"] == "preview_pending" and len(result["episodes"]) == 4
+    assert result["status"] == "preview_pending" and len(result["episodes"]) == 10
 
 
 def test_runtime_numpy_scalars_are_normalized_before_durable_write(setup, tmp_path):

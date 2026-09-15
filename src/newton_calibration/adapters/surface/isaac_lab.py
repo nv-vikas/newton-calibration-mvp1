@@ -39,6 +39,7 @@ class ArticulationEnvCfg:
     base_armature_by_joint: dict[str, float] = field(default_factory=dict)
     analytic_inertia_by_joint: dict[str, float] = field(default_factory=dict)
     parameter_bounds: dict[str, tuple[float, float, float]] = field(default_factory=dict)
+    tuning_targets: tuple[str, ...] = ()
     num_substeps: int = 1
     solver_iterations: int = 100
     solver_tolerance: float = 1e-6
@@ -94,6 +95,7 @@ class ArticulationEnvCfg:
             base_armature_by_joint=dict(self.base_armature_by_joint),
             analytic_inertia_by_joint=dict(self.analytic_inertia_by_joint),
             parameter_bounds={name: tuple(bounds) for name, bounds in self.parameter_bounds.items()},
+            tuning_targets=tuple(self.tuning_targets),
             num_substeps=self.num_substeps,
             solver_iterations=self.solver_iterations,
             solver_tolerance=self.solver_tolerance,

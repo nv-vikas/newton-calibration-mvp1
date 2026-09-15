@@ -3,13 +3,13 @@ import numpy as np
 import torch
 from pxr import Gf, UsdGeom
 
-from newton_calibration.collection import MotionSpec
+from newton_calibration.collection import CalibrationRequest, MotionSpec
 from newton_calibration.collection.isaaclab_preview import IsaacLabScenePreview
 from newton_calibration.core.io import write_json
 from newton_calibration.isaaclab import ArticulationEnvCfg, tuning
 
 
-def run_assisted_collection(sim, robot, peg, camera, assets, output, backend, *, video=True):
+def run_assisted_collection(sim, robot, peg, camera, assets, output, backend, *, video=True, targets=(), duration_s=24.):
     joints = tuple(f"joint{i}" for i in range(1, 8))
     tensor = lambda value: value.torch if hasattr(value, "torch") else value
     order = [robot.joint_names.index(j) for j in joints]
@@ -33,12 +33,14 @@ def run_assisted_collection(sim, robot, peg, camera, assets, output, backend, *,
         source="Position limits: active USD joint attributes. Center: scene initial pose +0.6 rad joint1. "
                "20-degree amplitude cap, 0.3 rad/s and 0.6 rad/s² are simulation exploration proposals, NOT OEM operating limits",
         scene_id="flexiv-tabletop-unloaded-newton-v1",
+        duration_s=duration_s,
     )
     kp = [4000., 4000., 3000., 3000., 500., 500., 200.]
     kd = [80., 80., 60., 40., 10., 10., 5.]
     env = ArticulationEnvCfg(
         usd_path=str(assets / "Flexiv_Rizon4s_Grav.usd"), robot_id="flexiv-agent-assist-mvp1",
-        joint_groups={"arm": joints}, joint_map={j: j for j in joints}, joint_order=joints,
+        # Independent joint parameters, not one shared gain/friction for seven axes.
+        joint_groups={j: (j,) for j in joints}, joint_map={j: j for j in joints}, joint_order=joints,
         profile_confirmed=False, controller_profile_confirmed=False,
         controller_profile_source="Active Newton scene explicit IdealPD initialization priors; not OEM/Flexiv NRT gains",
         dt=sim.get_physics_dt(), base_stiffness_by_joint=dict(zip(joints, kp)),
@@ -64,6 +66,7 @@ def run_assisted_collection(sim, robot, peg, camera, assets, output, backend, *,
                                   backend_record=backend, update_objects=(peg,))
     # The actual user/agent call: no real evidence and no separate motion generator.
     result = tuning.assist(env=env, evidence=None, collection=spec, preview=preview, video=video,
+                           request=CalibrationRequest(target_parameters=tuple(targets)),
                            workdir=output / "runs")
     write_json(output / "assist_result.json", result)
     print("[AGENT-ASSIST] " + result.status + " | " + result.workdir, flush=True)

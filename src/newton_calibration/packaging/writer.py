@@ -387,16 +387,17 @@ def _write_articulation_package(validation: ValidationResult, output: str | Path
                 "usd_joint": environment.joint_map[logical_joint],
                 "group": group,
                 "stiffness": environment.base_stiffness_by_joint.get(logical_joint, environment.base_stiffness)
-                * params[f"{group}_stiffness_scale"],
+                * params.get(f"{group}_stiffness_scale", 1.0),
                 "damping": environment.base_damping_by_joint.get(logical_joint, environment.base_damping)
-                * params[f"{group}_damping_scale"],
+                * params.get(f"{group}_damping_scale", 1.0),
                 "effort_limit": environment.base_effort_limit_by_joint.get(logical_joint, environment.base_effort_limit)
-                * params[f"{group}_effort_scale"],
-                "armature": params[f"{group}_armature"],
-                "friction_nm": params[f"{group}_friction_nm"],
+                * params.get(f"{group}_effort_scale", 1.0),
+                "armature": params.get(f"{group}_armature", environment.base_armature_by_joint.get(logical_joint, environment.base_armature)),
+                "friction_nm": params.get(f"{group}_friction_nm", 0.0),
             }
         )
-    delay_steps = max(0, round(params["command_delay_s"] / environment.dt))
+    requested_delay = params.get("command_delay_s", 0.0)
+    delay_steps = max(0, round(requested_delay / environment.dt))
     effective_delay_s = delay_steps * environment.dt
     actuator_patch = output_dir / "actuator_patch.yaml"
     actuator_patch.write_text(
@@ -407,7 +408,7 @@ def _write_articulation_package(validation: ValidationResult, output: str | Path
                 "source_asset": f"./assets/{packaged_asset.name}",
                 "ordered_joints": patch_entries,
                 "command_delay": {
-                    "requested_s": params["command_delay_s"],
+                    "requested_s": requested_delay,
                     "steps_at_runtime_dt": delay_steps,
                     "effective_s": effective_delay_s,
                 },
@@ -483,7 +484,7 @@ def _write_articulation_package(validation: ValidationResult, output: str | Path
         "parameters": params,
         "parameter_application": application,
         "timing_quantization": {
-            "requested_command_delay_s": params["command_delay_s"],
+            "requested_command_delay_s": requested_delay,
             "runtime_dt_s": environment.dt,
             "applied_delay_steps": delay_steps,
             "effective_command_delay_s": effective_delay_s,

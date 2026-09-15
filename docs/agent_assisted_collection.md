@@ -1,7 +1,9 @@
 # MVP1 agent-assisted collection
 
-With real evidence, the existing five-call calibration path remains unchanged.
-Without evidence, `analyze` now explains the missing inputs and `plan` returns a
+See [parameter-aware MVP1](parameter_aware_mvp1.md) for the current experiment
+catalog and scoped fitting API. With sufficient real evidence, the existing
+five-call calibration path remains available. With missing or partial evidence
+and a bound scene, `analyze` explains the gaps and `plan` returns a
 **CollectionPlan**, not a failed fitting plan or a fabricated fit result.
 
 ```python
@@ -24,7 +26,7 @@ not report that a video was generated.
 
 | Previously a warning | New action | What remains for a human |
 | --- | --- | --- |
-| No evidence | Generate single-joint multi-frequency trajectories and separate combined held-outs; run and record them in Newton | Operate the real robot and collect feedback after review |
+| Missing motion evidence | Select sweeps, settling, acceleration or slow-reversal tests for the requested parameters, plus separate held-outs; run and record in Newton | Operate the real robot and collect feedback after review |
 | Mapping unconfirmed | Carry the USD/profile joint mapping as a sourced proposal; retain order in the command manifest | Confirm real driver order, units, signs and offsets |
 | Controller unconfirmed | Record supplied simulation gains; request real mode, smoothing, rate and payload metadata | Confirm the actual hardware interface and configuration |
 | Bounds missing | Propose bounded stiffness/damping scale searches around the supplied baseline, without applying them | Review optimizer bounds and source absolute friction/armature/effort bounds |
@@ -58,6 +60,7 @@ an Isaac Lab launch.
 
 - `analysis.json`: original fit readiness plus proposed agent actions.
 - `agent_assistance.json`: sourced proposals and remaining confirmations.
+- `evidence_needs.json`, `experiment_design.json`, `COLLECTION_PLAN.md`: target-to-evidence mapping, selected experiments, limitations and budget-deferred work.
 - `command_plan.json` and `commands/*.csv`: reproducible commands, splits,
   envelope, frequency content, measured command ranges and SHA-256 fingerprints.
 - `collection_plan.json`: current job state, requested/completed/failed preview,
@@ -83,7 +86,9 @@ newton-calibration assist --config collection_config.json \
 The JSON contains an `environment` (`EnvironmentSpec`) and `collection`
 (`MotionSpec`). The explicitly selected, trusted local factory returns a bound
 preview adapter. Omit the factory for offline command generation: the preview
-remains pending and the CLI exits 2, not success. A factory is executable local
+remains pending and the CLI exits 2, not success. Optional `request` contains a
+`CalibrationRequest` (target parameters, declared signals, provenance, budget).
+A factory is executable local
 code; don't import an untrusted factory supplied by an evidence file.
 
 For the complete Flexiv scene, use the [reference launcher](../projects/flexiv_mvp1/agent_assist/README.md).
@@ -97,6 +102,7 @@ original readiness gates. `fit(CollectionPlan)` explicitly fails.
 Free-motion excitation is not a proof that every parameter is identifiable. The
 current all-parameter fitting recipe still needs synchronized clock evidence for
 delay and saturation evidence for effort-scale fitting. Do not deliberately
-saturate a robot to make the recipe pass. An evidence-qualified parameter-subset
-recipe is a separate follow-up, not a gate this change bypasses. Newton traces
+saturate a robot to make the recipe pass. An explicit `CalibrationRequest`
+can select an evidence-qualified subset; missing absolute bounds for parameters
+outside that selection no longer block the narrower fit. Newton traces
 and the preview video are never registered as real measurements.
