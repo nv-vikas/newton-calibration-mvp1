@@ -34,10 +34,15 @@ def main() -> None:
         full_plan,
         train_episodes=full_plan.train_episodes[:1],
         heldout_episodes=full_plan.heldout_episodes[:1],
-        optimizer={**full_plan.optimizer, "max_episode_duration_s": args.duration},
+        optimizer={
+            **full_plan.optimizer,
+            "max_episode_duration_s": args.duration,
+            "generations": 1,
+            "population": 4,
+        },
     )
     write_json(Path(smoke_plan.workdir) / "plan.json", smoke_plan)
-    fit_run = tuning.fit(smoke_plan, generations=1, population=4, resume=False)
+    fit_run = tuning.fit(smoke_plan, resume=False)
     validation = tuning.validate(fit_run)
     smoke_metrics_passed = validation.passed
     # A truncated integration test must never be mistaken for a releaseable
