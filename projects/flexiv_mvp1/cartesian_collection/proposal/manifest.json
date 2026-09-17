@@ -1,0 +1,294 @@
+{
+  "schema": "flexiv.cartesian_collection/v1",
+  "status": "proposal_unbound_not_robot_approved",
+  "boundary": "direct_rdk_cartesian_tcp_targets_derived_from_flange_reference",
+  "command_rate_hz": 15.0,
+  "rate_source": "15 Hz proposal inspired by tutorial; NOT a confirmed deployment rate",
+  "offset_semantics": "fixed taught flange anchor; translation/rotation vectors in confirmed base frame",
+  "real_execution_approved": false,
+  "newton_screened": false,
+  "real_data": false,
+  "duration_s": 390,
+  "limits": {
+    "translation_norm_m": 0.025,
+    "rotation_norm_rad": 0.06981317007977318,
+    "linear_speed_m_s": 0.05,
+    "angular_speed_rad_s": 0.16,
+    "linear_acceleration_m_s2": 0.2,
+    "angular_acceleration_rad_s2": 0.8
+  },
+  "generator_sha256": "c2a1d33f560e613985773e1ad1cc8bef3b9eb9f3685a3b6eced647a224443528",
+  "episodes": [
+    {
+      "id": "00_stationary",
+      "kind": "stationary",
+      "axis": "coupled/none",
+      "split": "train",
+      "duration_s": 6,
+      "samples": 91,
+      "path": "commands/00_stationary.csv",
+      "sha256": "0850e2ccfc61ce7f5c74e2dcf021f15a72de581bbb46f3000159cfd1c22e59ea",
+      "metrics": {
+        "translation_norm_m": 0.0,
+        "rotation_norm_rad": 0.0,
+        "linear_speed_m_s": 0.0,
+        "angular_speed_rad_s": 0.0,
+        "linear_acceleration_m_s2": 0.0,
+        "angular_acceleration_rad_s2": 0.0
+      }
+    },
+    {
+      "id": "01_x_reversals",
+      "kind": "reversals",
+      "axis": "x",
+      "split": "train",
+      "duration_s": 24,
+      "samples": 361,
+      "path": "commands/01_x_reversals.csv",
+      "sha256": "cdcdf39460aeeda6669f9b8e929298378f08e72cfefe1e10d81acb5cb32184d7",
+      "metrics": {
+        "translation_norm_m": 0.0199956136695,
+        "rotation_norm_rad": 0.0,
+        "linear_speed_m_s": 0.014335849311,
+        "angular_speed_rad_s": 0.0,
+        "linear_acceleration_m_s2": 0.019971717210000035,
+        "angular_acceleration_rad_s2": 0.0
+      }
+    },
+    {
+      "id": "02_y_reversals",
+      "kind": "reversals",
+      "axis": "y",
+      "split": "train",
+      "duration_s": 24,
+      "samples": 361,
+      "path": "commands/02_y_reversals.csv",
+      "sha256": "a43782f06fcd53a38693b320659f5faf082c87c00c2c421d0bfeaa08d52e8f65",
+      "metrics": {
+        "translation_norm_m": 0.0199956136695,
+        "rotation_norm_rad": 0.0,
+        "linear_speed_m_s": 0.014335849311,
+        "angular_speed_rad_s": 0.0,
+        "linear_acceleration_m_s2": 0.019971717210000035,
+        "angular_acceleration_rad_s2": 0.0
+      }
+    },
+    {
+      "id": "03_z_reversals",
+      "kind": "reversals",
+      "axis": "z",
+      "split": "train",
+      "duration_s": 24,
+      "samples": 361,
+      "path": "commands/03_z_reversals.csv",
+      "sha256": "90a1e721680e601c95bced6dd21f7f270b9e90a36ffa79380ab69395a0fc0eda",
+      "metrics": {
+        "translation_norm_m": 0.0199956136695,
+        "rotation_norm_rad": 0.0,
+        "linear_speed_m_s": 0.014335849311,
+        "angular_speed_rad_s": 0.0,
+        "linear_acceleration_m_s2": 0.019971717210000035,
+        "angular_acceleration_rad_s2": 0.0
+      }
+    },
+    {
+      "id": "04_rx_reversals",
+      "kind": "reversals",
+      "axis": "rx",
+      "split": "train",
+      "duration_s": 24,
+      "samples": 361,
+      "path": "commands/04_rx_reversals.csv",
+      "sha256": "b21ece47ad9770fc54b81100f7f683825aa3a133c73b20ac67aa94544c5998d6",
+      "metrics": {
+        "translation_norm_m": 0.0,
+        "rotation_norm_rad": 0.0523483941734,
+        "linear_speed_m_s": 0.0,
+        "angular_speed_rad_s": 0.03753116573100002,
+        "linear_acceleration_m_s2": 0.0,
+        "angular_acceleration_rad_s2": 0.0522858333600015
+      }
+    },
+    {
+      "id": "05_ry_reversals",
+      "kind": "reversals",
+      "axis": "ry",
+      "split": "train",
+      "duration_s": 24,
+      "samples": 361,
+      "path": "commands/05_ry_reversals.csv",
+      "sha256": "1d279c2cd7f58172a82cd5a0e0b1bde9495b84cecbaf449b1f0497a22feeb45f",
+      "metrics": {
+        "translation_norm_m": 0.0,
+        "rotation_norm_rad": 0.0523483941734,
+        "linear_speed_m_s": 0.0,
+        "angular_speed_rad_s": 0.03753116573100002,
+        "linear_acceleration_m_s2": 0.0,
+        "angular_acceleration_rad_s2": 0.0522858333600015
+      }
+    },
+    {
+      "id": "06_rz_reversals",
+      "kind": "reversals",
+      "axis": "rz",
+      "split": "train",
+      "duration_s": 24,
+      "samples": 361,
+      "path": "commands/06_rz_reversals.csv",
+      "sha256": "0fcf315a363b7d569ba8842af55573fd0ae06fb5b3d9621f47096b72c58338e9",
+      "metrics": {
+        "translation_norm_m": 0.0,
+        "rotation_norm_rad": 0.0523483941734,
+        "linear_speed_m_s": 0.0,
+        "angular_speed_rad_s": 0.03753116573100002,
+        "linear_acceleration_m_s2": 0.0,
+        "angular_acceleration_rad_s2": 0.0522858333600015
+      }
+    },
+    {
+      "id": "07_x_chirp",
+      "kind": "chirp",
+      "axis": "x",
+      "split": "train",
+      "duration_s": 30,
+      "samples": 451,
+      "path": "commands/07_x_chirp.csv",
+      "sha256": "37545c8b9e83ae07d26fdee0bf1ffc36c1349fa7de681390f59db7b774ee779b",
+      "metrics": {
+        "translation_norm_m": 0.006,
+        "rotation_norm_rad": 0.0,
+        "linear_speed_m_s": 0.0234789727629,
+        "angular_speed_rad_s": 0.0,
+        "linear_acceleration_m_s2": 0.09282088804950003,
+        "angular_acceleration_rad_s2": 0.0
+      }
+    },
+    {
+      "id": "08_y_chirp",
+      "kind": "chirp",
+      "axis": "y",
+      "split": "train",
+      "duration_s": 30,
+      "samples": 451,
+      "path": "commands/08_y_chirp.csv",
+      "sha256": "738c97890ad60c96cd7433a860b0fe05a816c4370de42ab1dc1f2dc7bdf50c84",
+      "metrics": {
+        "translation_norm_m": 0.006,
+        "rotation_norm_rad": 0.0,
+        "linear_speed_m_s": 0.0234789727629,
+        "angular_speed_rad_s": 0.0,
+        "linear_acceleration_m_s2": 0.09282088804950003,
+        "angular_acceleration_rad_s2": 0.0
+      }
+    },
+    {
+      "id": "09_z_chirp",
+      "kind": "chirp",
+      "axis": "z",
+      "split": "train",
+      "duration_s": 30,
+      "samples": 451,
+      "path": "commands/09_z_chirp.csv",
+      "sha256": "5bb500351236e2090c9f1c95e846581ce2ea3a4266f19cd695a787abc6a49688",
+      "metrics": {
+        "translation_norm_m": 0.006,
+        "rotation_norm_rad": 0.0,
+        "linear_speed_m_s": 0.0234789727629,
+        "angular_speed_rad_s": 0.0,
+        "linear_acceleration_m_s2": 0.09282088804950003,
+        "angular_acceleration_rad_s2": 0.0
+      }
+    },
+    {
+      "id": "10_rx_chirp",
+      "kind": "chirp",
+      "axis": "rx",
+      "split": "train",
+      "duration_s": 30,
+      "samples": 451,
+      "path": "commands/10_rx_chirp.csv",
+      "sha256": "1ca9a0581bdffb95136e29157499eff3ebb86fa8350b8e136e9168e4a8f979c1",
+      "metrics": {
+        "translation_norm_m": 0.0,
+        "rotation_norm_rad": 0.0174532925199,
+        "linear_speed_m_s": 0.0,
+        "angular_speed_rad_s": 0.06829756328325,
+        "linear_acceleration_m_s2": 0.0,
+        "angular_acceleration_rad_s2": 0.27000501851250003
+      }
+    },
+    {
+      "id": "11_ry_chirp",
+      "kind": "chirp",
+      "axis": "ry",
+      "split": "train",
+      "duration_s": 30,
+      "samples": 451,
+      "path": "commands/11_ry_chirp.csv",
+      "sha256": "67119a6581a365d44fa47eb31ed5e1f1c821040e1cdf4529553a5957c03bff52",
+      "metrics": {
+        "translation_norm_m": 0.0,
+        "rotation_norm_rad": 0.0174532925199,
+        "linear_speed_m_s": 0.0,
+        "angular_speed_rad_s": 0.06829756328325,
+        "linear_acceleration_m_s2": 0.0,
+        "angular_acceleration_rad_s2": 0.27000501851250003
+      }
+    },
+    {
+      "id": "12_rz_chirp",
+      "kind": "chirp",
+      "axis": "rz",
+      "split": "train",
+      "duration_s": 30,
+      "samples": 451,
+      "path": "commands/12_rz_chirp.csv",
+      "sha256": "eb8368c0abbfe60cdef514fe15b4dc43880b08caa4f12fdfcc4d7340ce0a1295",
+      "metrics": {
+        "translation_norm_m": 0.0,
+        "rotation_norm_rad": 0.0174532925199,
+        "linear_speed_m_s": 0.0,
+        "angular_speed_rad_s": 0.06829756328325,
+        "linear_acceleration_m_s2": 0.0,
+        "angular_acceleration_rad_s2": 0.27000501851250003
+      }
+    },
+    {
+      "id": "13_heldout_coupled_a",
+      "kind": "heldout_a",
+      "axis": "coupled/none",
+      "split": "heldout",
+      "duration_s": 30,
+      "samples": 451,
+      "path": "commands/13_heldout_coupled_a.csv",
+      "sha256": "a450fc0a1a1bc420dd2a9a1b698050bf5b41beffedf8a5c0f4ae40ac70f5a77c",
+      "metrics": {
+        "translation_norm_m": 0.015411351725350162,
+        "rotation_norm_rad": 0.03312161668326718,
+        "linear_speed_m_s": 0.009873024555352682,
+        "angular_speed_rad_s": 0.03393230827836063,
+        "linear_acceleration_m_s2": 0.01436565184788419,
+        "angular_acceleration_rad_s2": 0.048732948579243374
+      }
+    },
+    {
+      "id": "14_heldout_coupled_b",
+      "kind": "heldout_b",
+      "axis": "coupled/none",
+      "split": "heldout",
+      "duration_s": 30,
+      "samples": 451,
+      "path": "commands/14_heldout_coupled_b.csv",
+      "sha256": "ab85391823cb566ec009b2a3578986f5b0540b37daab4a6f24c0f5a34113103e",
+      "metrics": {
+        "translation_norm_m": 0.015031495140290186,
+        "rotation_norm_rad": 0.03267344700594793,
+        "linear_speed_m_s": 0.012685772699482834,
+        "angular_speed_rad_s": 0.038869846647504036,
+        "linear_acceleration_m_s2": 0.02054118930291539,
+        "angular_acceleration_rad_s2": 0.06613724605514472
+      }
+    }
+  ],
+  "identifiability": "Excitation proposals, not proof of identifying all seven-joint parameters. Use multiple reviewed postures; inspect excitation and sensitivity after collection."
+}
