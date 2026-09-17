@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import uuid
 from dataclasses import replace
 from pathlib import Path
@@ -36,6 +37,7 @@ from newton_calibration.core.models import (
     ValidationResult,
     jsonable,
 )
+from newton_calibration.core.run_status import RunStatus
 from newton_calibration.optimizers import (
     OptimizerContractError,
     OptimizerInit,
@@ -47,6 +49,8 @@ from newton_calibration.optimizers import (
 )
 from newton_calibration.packaging.writer import write_package
 from newton_calibration.recipes import get_recipe
+
+_log = logging.getLogger(__name__)
 
 
 def analyze(
@@ -179,6 +183,17 @@ def analyze(
     )
     result.assistance = prepare_assistance(result)
     write_json(run_dir / "analysis.json", result)
+    status = RunStatus(run_dir, run_id)
+    blocked = [name for name, ready in readiness.items() if not ready]
+    if blocked:
+        status.finish("analyze", f"{len(identifiable)} parameters proposed; readiness incomplete")
+        status.block("plan", f"readiness checks failed: {', '.join(blocked)}")
+    else:
+        status.finish(
+            "analyze",
+            f"{len(identifiable)} parameters admitted from {len(inventory['train_episodes'])} train "
+            f"and {len(inventory['heldout_episodes'])} held-out episodes",
+        )
     return result
 
 
@@ -293,6 +308,12 @@ def plan(
         evidence_spec=dict(analysis.evidence_spec),
     )
     write_json(Path(result.workdir) / "plan.json", result)
+    status = RunStatus.attach(Path(result.workdir), result.run_id)
+    status.finish(
+        "plan",
+        f"locked · {len(train)} fit / {len(heldout)} sealed · recipe {recipe_cfg.name} · "
+        f"optimizer {optimizer_config['name']}",
+    )
     return result
 
 
@@ -309,6 +330,8 @@ def fit(
             "fit requires a CalibrationPlan backed by real evidence, not a CollectionPlan; collect and re-analyze first"
         )
     run_dir = Path(calibration_plan.workdir)
+    status = RunStatus.attach(run_dir, calibration_plan.run_id)
+    status.start("fit")
     history_path = run_dir / "candidate-history.jsonl"
     evidence = _evidence_adapter_from_plan(calibration_plan)
     _assert_locked_inputs_unchanged(calibration_plan, evidence=evidence)
@@ -412,6 +435,8 @@ def fit(
             runtime, initial, episodes, calibration_plan, candidate_id=-1, generation=-1, phase="fit-baseline"
         )
         write_json(run_dir / "baseline.json", baseline_eval)
+        status.progress(0, population_size * generation_count, baseline=baseline_eval.score)
+        status.event(f"baseline scored {baseline_eval.score:.4f}")
         for generation in range(optimizer.generation, generation_count):
             candidate_id_start = candidate_id
             candidates = validate_candidates(
@@ -445,6 +470,7 @@ def fit(
                     )
                 evaluations.append(evaluation)
                 candidate_id += 1
+                _publish_candidate(status, optimizer, evaluation, candidate_id, population_size * generation_count)
             scores = validate_scores(
                 [evaluation.score for evaluation in evaluations],
                 expected_count=len(candidates),
@@ -503,6 +529,13 @@ def fit(
         runtime_attestation=runtime_attestation,
     )
     write_json(run_dir / "fit.json", result)
+    status.finish(
+        "fit",
+        f"best {best_eval.score:.4f} against baseline {baseline_eval.score:.4f} "
+        f"over {optimizer.generation} generations",
+        best=best_eval.score,
+        baseline=baseline_eval.score,
+    )
     return result
 
 
@@ -580,6 +613,16 @@ def validate(fit_run: FitResult) -> ValidationResult:
         calibrated_stable=calibrated.stable,
     )
     write_json(Path(plan_cfg.workdir) / "validation.json", result)
+    status = RunStatus.attach(Path(plan_cfg.workdir), fit_run.run_id)
+    failed_gates = [name for name, ok in gates.items() if not ok]
+    verdict = "passed" if result.passed else f"failed: {', '.join(failed_gates)}"
+    status.finish(
+        "validate",
+        f"held-out {verdict} · {improvement:.1f}% improvement · {len(episodes)} sealed episodes",
+        improvement_pct=improvement,
+    )
+    if not result.passed:
+        status.block("write", "gate did not pass; no activatable package")
     return result
 
 
@@ -587,7 +630,10 @@ def write(validation: ValidationResult, *, output: str | Path) -> CalibrationPac
     """Call 5/5: emit the setup-scoped package and complete job record."""
     _assert_locked_inputs_unchanged(validation.fit.plan)
     _assert_result_records_unchanged(validation)
-    return write_package(validation, output)
+    package = write_package(validation, output)
+    status = RunStatus.attach(Path(validation.fit.plan.workdir), validation.run_id)
+    status.finish("write", f"package written to {output}")
+    return package
 
 
 def _environment_spec(env: Any) -> EnvironmentSpec:
@@ -971,3 +1017,26 @@ def _fit_execution_fingerprint(
     except (TypeError, ValueError) as exc:
         raise OptimizerContractError("fit execution configuration must be JSON serializable and finite") from exc
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _publish_candidate(
+    status: RunStatus,
+    optimizer: Any,
+    evaluation: CandidateEvaluation,
+    done: int,
+    total: int,
+) -> None:
+    """Publish one candidate outcome to the run's status surface.
+
+    Display only.  The fit journal remains the authoritative record, so this
+    never raises into the search loop.
+    """
+
+    try:
+        best = optimizer.best
+        best_score = float(best[1]) if best is not None else None
+        status.progress(done, total, **({"best": best_score} if best_score is not None else {}))
+        outcome = "stable" if evaluation.stable else f"rejected ({evaluation.error or 'unstable'})"
+        status.event(f"candidate {evaluation.candidate_id} {outcome}, score {evaluation.score:.4f}")
+    except Exception:  # noqa: BLE001 - a display failure must not end the fit
+        _log.debug("could not publish candidate status", exc_info=True)
