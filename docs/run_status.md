@@ -53,8 +53,20 @@ python3 scripts/watch_run.py runs/so101-8f2830f962 --once
 ssh newton-tune 'cat /workspace/runs/so101-8f2830f962/status.json'
 ```
 
-It exits on its own when the run reaches `COMPLETE`, `FAILED` or `BLOCKED`, and flags the
+It exits on its own when the run reaches `COMPLETE`, `FAILED`, `BLOCKED` or `ACTION_REQUIRED`, and flags the
 status as stale if nothing has updated for two minutes while the run claims to be active.
+
+`plan`, `fit`, `validate` and `write` publish their running state on entry. Normal
+exceptions and Python interruptions mark the call failed and then re-raise the
+original exception. Status-publishing failures never replace the job's exception.
+An explicit fitting-readiness rejection stays `BLOCKED`, not `FAILED`. A retry
+clears the previous attempt's failure summary and obsolete progress.
+
+An OS kill, machine loss or power failure cannot execute a Python failure handler;
+these still require the watcher's stale warning and authoritative run logs. A long
+individual rollout can also be stale without having crashed. Analysis currently
+creates its run ID/status after inventory; failures before that point have no run
+status file and remain ordinary API exceptions.
 
 ## Shape
 
@@ -86,8 +98,8 @@ Call status is one of `waiting`, `running`, `done`, `blocked`, `failed`.
 readiness gates that did not pass, or a gate that rejected the candidate — and its reason
 is the most useful thing on the screen when one occurs. A failed call is an exception.
 
-A blocked run looks like this, and is exactly what the Flexiv reference project produces
-today:
+A blocked run looks like this when fitting is explicitly requested before its
+readiness requirements are satisfied:
 
 ```
 flexiv-rizon4s-grav-mvp1-32288a455c
@@ -99,6 +111,29 @@ BLOCKED  ·  updated 3s ago
   waiting  validate  -
   waiting  write     -
 ```
+
+## Missing evidence: collection is a valid planning outcome
+
+`analyze` reports incomplete **fitting** readiness but leaves `plan` waiting.
+It does not prematurely block a valid evidence-collection route. While `plan`
+generates commands or runs a preview, it shows `PLANNING`. On return:
+
+| Collection result | Headline state |
+|---|---|
+| Commands generated; preview missing or explicitly skipped | `ACTION_REQUIRED`: screen/review before real collection |
+| Preview completed, operator review/real evidence still needed | `ACTION_REQUIRED` |
+| Scene/controller setup or other evidence action required | `BLOCKED`, with the actual reason |
+| Simulation screening rejected the proposed motion | `BLOCKED`; command/video artifacts retained |
+| Motion generation, dynamics design or preview failed | `FAILED`; original collection record retained |
+
+The status includes a `collection` object with command count, collection/preview
+outcome, screening result when available, and explicit `fit_allowed: false` and
+`real_execution_approved: false`. The watcher displays this branch beneath the
+five calls. A successful collection plan is **not** a calibrated package or
+permission to run hardware. Collect real evidence and re-analyze before fitting.
+
+The separate experimental Cartesian RDK collection scripts are not automatically
+instrumented by this five-call status surface.
 
 ## For agents
 

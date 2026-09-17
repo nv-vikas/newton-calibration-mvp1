@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 CALLS = ("analyze", "plan", "fit", "validate", "write")
-TERMINAL = {"COMPLETE", "FAILED", "BLOCKED"}
+TERMINAL = {"COMPLETE", "FAILED", "BLOCKED", "ACTION_REQUIRED"}
 STALE_AFTER_S = 120.0
 
 RESET = "\033[0m"
@@ -140,6 +140,15 @@ def render(state: dict[str, Any], *, color: bool) -> str:
             lines.append(f"           {bar(done, total)} {detail}")
 
     blockers = state.get("blockers") or []
+    collection = state.get("collection")
+    if isinstance(collection, dict):
+        lines.append("")
+        lines.append(
+            f"  evidence collection: {collection.get('status', 'unknown')} · "
+            f"{collection.get('command_files', 0)} command files · "
+            f"preview {collection.get('preview_status', 'unknown')}"
+        )
+        lines.append("  Not fit-ready; no real-robot execution approval.")
     if blockers:
         lines.append("")
         lines.append(paint("  blocked:", AMBER))

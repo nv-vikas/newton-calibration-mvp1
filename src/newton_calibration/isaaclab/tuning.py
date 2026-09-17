@@ -37,7 +37,7 @@ from newton_calibration.core.models import (
     ValidationResult,
     jsonable,
 )
-from newton_calibration.core.run_status import RunStatus
+from newton_calibration.core.run_status import RunStatus, observe_call
 from newton_calibration.optimizers import (
     OptimizerContractError,
     OptimizerInit,
@@ -186,8 +186,10 @@ def analyze(
     status = RunStatus(run_dir, run_id)
     blocked = [name for name, ready in readiness.items() if not ready]
     if blocked:
-        status.finish("analyze", f"{len(identifiable)} parameters proposed; readiness incomplete")
-        status.block("plan", f"readiness checks failed: {', '.join(blocked)}")
+        status.finish(
+            "analyze", f"{len(identifiable)} parameters proposed; fitting readiness incomplete; "
+            "plan can prepare evidence collection",
+        )
     else:
         status.finish(
             "analyze",
@@ -225,6 +227,7 @@ def assist(
     return plan(analysis, collection=collection, preview=preview, design_probe=design_probe, video=video)
 
 
+@observe_call("plan", "analysis")
 def plan(
     analysis: AnalysisResult,
     *,
@@ -263,11 +266,18 @@ def plan(
         intent == "auto"
         and (analysis.evidence_spec.get("adapter") == "missing" or (collection is not None and evidence_gaps))
     ):
-        return create_collection_plan(
+        status = RunStatus.attach(analysis.workdir, analysis.run_id)
+        status.event("Planning evidence collection; no real evidence or calibration is being fabricated")
+        result = create_collection_plan(
             analysis, motion=collection, preview=preview, design_probe=design_probe, video=video
         )
+        status.collection(outcome=result.status, episodes=len(result.episodes), preview=result.preview)
+        return result
     failed = [name for name, ready in analysis.readiness.items() if not ready]
     if failed:
+        RunStatus.attach(analysis.workdir, analysis.run_id).block(
+            "plan", f"Cannot plan fitting; readiness checks failed: {', '.join(failed)}"
+        )
         raise ValueError(f"Cannot plan calibration; readiness checks failed: {failed}")
     selected_recipe = recipe or analysis.recipe or "so101_actuator_dynamics.v1"
     if analysis.recipe and selected_recipe != analysis.recipe:
@@ -317,6 +327,7 @@ def plan(
     return result
 
 
+@observe_call("fit", "calibration_plan")
 def fit(
     calibration_plan: CalibrationPlan,
     *,
@@ -331,7 +342,6 @@ def fit(
         )
     run_dir = Path(calibration_plan.workdir)
     status = RunStatus.attach(run_dir, calibration_plan.run_id)
-    status.start("fit")
     history_path = run_dir / "candidate-history.jsonl"
     evidence = _evidence_adapter_from_plan(calibration_plan)
     _assert_locked_inputs_unchanged(calibration_plan, evidence=evidence)
@@ -539,6 +549,7 @@ def fit(
     return result
 
 
+@observe_call("validate", "fit_run", "plan")
 def validate(fit_run: FitResult) -> ValidationResult:
     """Call 4/5: compare baseline and calibrated parameters on data excluded from fitting."""
     plan_cfg = fit_run.plan
@@ -626,6 +637,7 @@ def validate(fit_run: FitResult) -> ValidationResult:
     return result
 
 
+@observe_call("write", "validation", "fit", "plan")
 def write(validation: ValidationResult, *, output: str | Path) -> CalibrationPackage:
     """Call 5/5: emit the setup-scoped package and complete job record."""
     _assert_locked_inputs_unchanged(validation.fit.plan)

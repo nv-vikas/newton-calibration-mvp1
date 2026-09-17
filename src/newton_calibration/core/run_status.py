@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+from contextlib import contextmanager
+from functools import wraps
+from inspect import signature
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +38,47 @@ _DONE_STATE = {
 }
 
 _log = logging.getLogger(__name__)
+
+
+def _best_effort(method):
+    """A display failure must neither replace an exception nor fail a healthy job."""
+
+    @wraps(method)
+    def wrapped(*args, **kwargs):
+        try:
+            return method(*args, **kwargs)
+        except Exception:  # noqa: BLE001 - observation only
+            _log.debug("could not update run status", exc_info=True)
+            return None
+
+    return wrapped
+
+
+def observe_call(call: str, argument: str, *path: str):
+    """Observe an existing run, without changing call signatures or exceptions.
+
+    ``argument`` identifies the Analysis/Plan/Fit/Validation argument. ``path``
+    reaches its locked plan. Invalid arguments remain the function's concern.
+    """
+
+    def decorate(function):
+        params = signature(function)
+
+        @wraps(function)
+        def wrapped(*args, **kwargs):
+            try:
+                obj = params.bind(*args, **kwargs).arguments[argument]
+                for name in path:
+                    obj = getattr(obj, name)
+                status = RunStatus.attach(obj.workdir, obj.run_id)
+            except Exception:  # noqa: BLE001 - never substitute display errors for API errors
+                return function(*args, **kwargs)
+            with status.observe(call):
+                return function(*args, **kwargs)
+
+        return wrapped
+
+    return decorate
 
 
 def status_enabled() -> bool:
@@ -96,7 +140,15 @@ class RunStatus:
         path = directory / STATUS_FILENAME
         try:
             loaded = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict) and loaded.get("schema") == STATUS_SCHEMA:
+            if (
+                isinstance(loaded, dict)
+                and loaded.get("schema") == STATUS_SCHEMA
+                and (run_id is None or loaded.get("run_id") == run_id)
+                and isinstance(loaded.get("calls"), dict)
+                and all(isinstance(entry, dict) for entry in loaded["calls"].values())
+                and isinstance(loaded.get("metrics"), dict)
+                and isinstance(loaded.get("blockers"), list)
+            ):
                 return cls(directory, str(loaded.get("run_id") or run_id or directory.name), state=loaded)
         except (OSError, ValueError):
             pass
@@ -104,16 +156,47 @@ class RunStatus:
 
     # --------------------------------------------------------------- mutators
 
+    @contextmanager
+    def observe(self, call: str):
+        """Surface normal exceptions/interruption; always re-raise the original.
+
+        Reload on failure because the call may have published newer progress,
+        or explicitly marked an expected readiness block through another object.
+        A killed process cannot run this handler; the watcher must detect staleness.
+        """
+        self.start(call)
+        try:
+            yield
+        except BaseException as error:
+            try:
+                current = type(self).attach(self.run_dir, self.run_id)
+                if current._state.get("calls", {}).get(call, {}).get("status") != "blocked":
+                    current.fail(call, f"{type(error).__name__}: {error}")
+            except Exception:  # noqa: BLE001 - preserve the original job exception
+                _log.debug("could not report failed call", exc_info=True)
+            raise
+
+    @_best_effort
     def start(self, call: str) -> None:
         """Mark a call as running and make it the current stage."""
 
         entry = self._call(call)
+        entry.clear()  # Remove old failure summary/end time on an explicit retry.
         entry["status"] = "running"
-        entry.setdefault("started_at", utc_now())
+        entry["started_at"] = utc_now()
+        self._state["blockers"] = []
+        self._state["progress"] = None
+        if call == "plan":
+            self._state.pop("collection", None)
+        if call == "fit":
+            for name in ("baseline", "best"):
+                self._state["metrics"].pop(name, None)
         self._state["current_call"] = call
         self._state["state"] = _RUNNING_STATE[call]
+        self._transition_event(f"{call} started")
         self._flush()
 
+    @_best_effort
     def finish(self, call: str, summary: str, **metrics: Any) -> None:
         """Mark a call as complete and record the one-line result a human reads."""
 
@@ -128,8 +211,10 @@ class RunStatus:
         if self._state.get("current_call") == call:
             self._state["current_call"] = None
         self._state["state"] = _DONE_STATE[call]
+        self._transition_event(f"{call}: {summary}")
         self._flush()
 
+    @_best_effort
     def block(self, call: str, reason: str) -> None:
         """Record why a call cannot proceed.
 
@@ -143,11 +228,14 @@ class RunStatus:
         entry["ended_at"] = utc_now()
         self._state["state"] = "BLOCKED"
         self._state["current_call"] = None
+        self._state["progress"] = None
         blockers = self._state.setdefault("blockers", [])
         if reason not in blockers:
             blockers.append(reason)
+        self._transition_event(f"{call} blocked: {reason}")
         self._flush()
 
+    @_best_effort
     def fail(self, call: str, error: str) -> None:
         """Record an unexpected failure, distinct from a blocked readiness gate."""
 
@@ -156,8 +244,12 @@ class RunStatus:
         entry["summary"] = error
         entry["ended_at"] = utc_now()
         self._state["state"] = "FAILED"
+        self._state["current_call"] = None
+        self._state["progress"] = None
+        self._transition_event(f"{call} failed: {error}")
         self._flush()
 
+    @_best_effort
     def progress(self, done: int, total: int, *, unit: str = "candidates", **metrics: Any) -> None:
         """Publish counted progress for the current call.
 
@@ -175,14 +267,49 @@ class RunStatus:
             self._state["metrics"].update(jsonable(metrics))
         self._flush()
 
+    @_best_effort
     def event(self, text: str) -> None:
         """Append one line to the event stream and surface it as the latest line."""
 
-        self._state["last_event"] = text
-        self._append_event({"at": utc_now(), "run_id": self.run_id, "text": text})
+        self._transition_event(text)
         self._flush()
 
+    @_best_effort
+    def collection(self, *, outcome: str, episodes: int, preview: dict[str, Any]) -> None:
+        """Report the collection branch, never fitting readiness or robot approval."""
+        self._state["collection"] = {
+            "status": outcome,
+            "command_files": episodes,
+            "preview_status": preview.get("status"),
+            "screen_passed": preview.get("screen_passed"),
+            "fit_allowed": False,
+            "real_execution_approved": False,
+        }
+        detail = preview.get("error") or preview.get("reason") or outcome.replace("_", " ")
+        if outcome in {"design_failed", "generation_failed", "preview_failed"}:
+            self.fail("plan", f"Evidence collection {outcome}: {detail}")
+        elif outcome in {"needs_scene_setup", "controller_action_required", "evidence_action_required"}:
+            self.block("plan", f"Evidence collection needs setup/review: {detail}")
+        elif preview.get("screen_passed") is False:
+            self.block("plan", f"{episodes} command files retained; simulation screening failed; review required")
+        elif outcome not in {"commands_generated", "preview_pending", "preview_complete_review_required"}:
+            self.block("plan", f"Unrecognized collection outcome {outcome!r}; inspect the collection record")
+        else:
+            summary = f"{episodes} collection command files; "
+            if preview.get("status") in {"pending", "blocked", "skipped_explicitly"}:
+                summary += "preview pending/skipped; screen and review before collecting real evidence"
+            else:
+                summary += "review collection artifacts, collect real evidence, then re-analyze"
+            self.finish("plan", summary)
+            self._state["state"] = "ACTION_REQUIRED"
+            self._state["blockers"] = []
+            self._flush()
+
     # ---------------------------------------------------------------- private
+
+    def _transition_event(self, text: str) -> None:
+        self._state["last_event"] = text
+        self._append_event({"at": utc_now(), "run_id": self.run_id, "text": text})
 
     def _call(self, call: str) -> dict[str, Any]:
         if call not in CALLS:
